@@ -1,0 +1,6 @@
+edition = "2021"
+
+# https://github.com/rust-lang/rustfmt/blob/master/Configurations.md#use_small_heuristics
+use_small_heuristics = "Max"
+# https://github.com/rust-lang/rustfmt/blob/master/Configurations.md#group_imports
+group_imports = "StdExternalCrate"

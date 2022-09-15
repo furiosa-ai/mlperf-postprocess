@@ -1,0 +1,27 @@
+[package]
+name = "mlperf-postprocess"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+exclude = ["models"]
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+legacy-npu-tools = []
+
+[dependencies]
+cpp = "0.5.6"
+crc = "2.1.0"
+itertools = "0.10.3"
+openmp-sys = "1.2.3"
+rayon = "1.5.1"
+tracing = "0.1.29"
+prost = "0.11.0"
+eyre = "0.6.5"
+lazy_static = "1.4.0"
+indexmap = "1.8.0"
+
+[build-dependencies]
+cbindgen = "0.20.0"
+cpp_build = "0.5.6"
+prost-build = "0.11.0"
