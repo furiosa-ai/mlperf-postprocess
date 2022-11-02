@@ -1,9 +1,11 @@
 SHELL=/bin/bash -o pipefail
 
-.PHONY: lint test
+.PHONY: toolchain lint test
+
+toolchain:
 
 lint:
-	echo "Hello, lint!"
+	cargo fmt --all --check && cargo -q clippy --all-targets -- -D rust_2018_idioms -D warnings
 
 test:
-	echo "Hello, test!"
+	cargo test

@@ -67,7 +67,7 @@ spec:
         #!/usr/bin/env bash
         set -e
         cd /workspace/source
-        make unittest
+        make test
       resources:
         requests:
           memory: 32Gi
