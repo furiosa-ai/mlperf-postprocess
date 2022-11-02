@@ -17,7 +17,7 @@ spec:
   params:
     - name: image
       description: The container image to use black in
-      default: rust:slim-bullseye
+      default: asia-northeast3-docker.pkg.dev/next-gen-infra/furiosa-ai/mlperf-postprocess:221102
   steps:
     - name: format
       env:
@@ -56,7 +56,7 @@ spec:
   params:
     - name: image
       description: The container image to use black in
-      default: rust:slim-bullseye
+      default: asia-northeast3-docker.pkg.dev/next-gen-infra/furiosa-ai/mlperf-postprocess:221102
   steps:
     - name: unittest
       env:
