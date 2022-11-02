@@ -67,6 +67,38 @@ spec:
     - name: depth
       value: $(params.gitCloneDepth)
 
+  - name: lint
+    taskRef:
+      name: lint
+    workspaces:
+      - name: source
+        workspace: source
+      - name: furiosa-apt-credential
+        workspace: furiosa-apt-credential
+      - name: aws-credential
+        workspace: aws-credential
+      - name: internal-pypi-secret
+        workspace: internal-pypi-secret
+        subPath: .netrc
+    runAfter:
+      - clone
+
+  - name: unittest
+    taskRef:
+      name: unittest
+    workspaces:
+      - name: source
+        workspace: source
+      - name: furiosa-apt-credential
+        workspace: furiosa-apt-credential
+      - name: aws-credential
+        workspace: aws-credential
+      - name: internal-pypi-secret
+        workspace: internal-pypi-secret
+        subPath: .netrc
+    runAfter:
+      - lint
+
   finally:
   - name: set-status-success
     taskRef:
