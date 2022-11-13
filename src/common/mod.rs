@@ -1,4 +1,5 @@
 pub mod graph;
+pub mod model;
 pub mod proto;
 pub mod shape;
 pub mod ssd_postprocess;
