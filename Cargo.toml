@@ -8,9 +8,10 @@ exclude = ["models"]
 
 [features]
 legacy-npu-tools = []
+cpp_impl = ["cpp", "cpp_build", "cbindgen"]
 
 [dependencies]
-cpp = "0.5.6"
+cpp = { version = "0.5.6", optional = true }
 crc = "2.1.0"
 itertools = "0.10.3"
 openmp-sys = "1.2.3"
@@ -22,6 +23,6 @@ lazy_static = "1.4.0"
 indexmap = "1.8.0"
 
 [build-dependencies]
-cbindgen = "0.20.0"
-cpp_build = "0.5.6"
+cbindgen = { version = "0.20.0", optional = true }
+cpp_build = { version = "0.5.6", optional = true }
 prost-build = "0.11.0"
