@@ -89,15 +89,7 @@ pub fn create_graph_from_binary_with_header(input: &[u8]) -> eyre::Result<GraphI
     assert_eq!(header.magic_number, BinaryHeader::create_magic_number(EXTENSION_DFG));
     ensure!(header.crc == BinaryHeader::create_crc(body), "Error: cyclic redundancy check failed",);
 
-    let graph = dfg::Graph::decode(body)?;
-
-    let tensors = graph
-        .tensors
-        .iter()
-        .map(|(&tensor_index, tensor)| (tensor_index, tensor.clone()))
-        .collect::<HashMap<TensorIndex, proto::common::Tensor>>();
-
-    Ok(GraphInfo { outputs: graph.outputs, tensors })
+    create_graph_from_binary(body)
 }
 
 // Belows are copied from npu-tools
