@@ -9,7 +9,7 @@ pub struct QuantizationParameter {
 #[derive(Debug, Clone)]
 pub enum ElementType {
     Float64,
-    Int4 { quantization_parameter: QuantizationParameter },
+    Int8 { quantization_parameter: QuantizationParameter },
 }
 
 #[derive(Debug, Clone)]
