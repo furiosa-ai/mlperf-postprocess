@@ -28,6 +28,7 @@ spec:
         #!/usr/bin/env bash
         set -e
         cd /workspace/source
+        rustup component add rustfmt clippy
         make lint
       resources:
         requests:
