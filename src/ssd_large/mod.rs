@@ -13,7 +13,7 @@ use crate::common::ssd_postprocess::{
     BoundingBox, CenteredBox, DetectionResult, DetectionResults, Postprocess,
 };
 use crate::common::{
-    shape::{LoweredShape, Shape},
+    shape::{Shape, TensorIndexer},
     uninitialized_vec,
 };
 
@@ -39,8 +39,8 @@ pub struct RustPostprocessor {
     output_exp_deq_tables: [[f32; 256]; NUM_OUTPUTS],
     output_exp_scale_deq_tables: [[f32; 256]; NUM_OUTPUTS],
     output_base_index: [usize; 7],
-    score_lowered_shapes: [LoweredShape; NUM_OUTPUTS / 2],
-    box_lowered_shapes: [LoweredShape; NUM_OUTPUTS / 2],
+    score_lowered_shapes: [TensorIndexer; NUM_OUTPUTS / 2],
+    box_lowered_shapes: [TensorIndexer; NUM_OUTPUTS / 2],
     box_priors: Vec<CenteredBox>,
     parallel_processing: bool,
 }
@@ -332,9 +332,9 @@ pub mod cxx {
             let mut output_deq_tables = [[0f32; 256]; NUM_OUTPUTS];
             let mut output_exp_deq_tables = [[0f32; 256]; NUM_OUTPUTS];
             let mut output_exp_scale_deq_tables = [[0f32; 256]; NUM_OUTPUTS];
-            let mut score_lowered_shapes: [LoweredShape; NUM_OUTPUTS / 2] =
+            let mut score_lowered_shapes: [TensorIndexer; NUM_OUTPUTS / 2] =
                 [Default::default(); NUM_OUTPUTS / 2];
-            let mut box_lowered_shapes: [LoweredShape; NUM_OUTPUTS / 2] =
+            let mut box_lowered_shapes: [TensorIndexer; NUM_OUTPUTS / 2] =
                 [Default::default(); NUM_OUTPUTS / 2];
 
             for (i, tensor_index) in main.outputs.iter().enumerate() {

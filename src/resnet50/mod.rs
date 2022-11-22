@@ -1,9 +1,9 @@
 use crate::common::graph::GraphInfo;
-use crate::common::{graph::TensorInfo, shape::LoweredShape};
+use crate::common::{graph::TensorInfo, shape::TensorIndexer};
 
 #[derive(Default, Debug, Clone)]
 pub struct Resnet50PostProcessor {
-    lowered_output_shape: LoweredShape,
+    lowered_output_shape: TensorIndexer,
 }
 
 impl Resnet50PostProcessor {

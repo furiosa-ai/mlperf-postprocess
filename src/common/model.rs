@@ -1,4 +1,4 @@
-use crate::common::shape::TensorStrides;
+use crate::common::shape::TensorIndexer;
 
 #[derive(Debug, Clone)]
 pub struct QuantizationParameter {
@@ -14,7 +14,7 @@ pub enum ElementType {
 
 #[derive(Debug, Clone)]
 pub struct TensorMeta {
-    pub shape: TensorStrides,
+    pub indexer: TensorIndexer,
     pub element_type: ElementType,
 }
 

@@ -6,17 +6,17 @@ use crate::common::proto;
 use crate::common::proto::common::{tensor_shape, TensorShape};
 
 #[derive(Debug, Default, Clone, Copy)]
-pub struct LoweredShape {
+pub struct TensorIndexer {
     ho_stride: usize,
     co_stride: usize,
     hi_stride: usize,
     ci_stride: usize,
     w_stride: usize,
-    slice_height: usize,
-    slice_channel: usize,
+    hi_limit: usize,
+    ci_limit: usize,
 }
 
-impl<'a> From<&'a TensorShape> for LoweredShape {
+impl<'a> From<&'a TensorShape> for TensorIndexer {
     fn from(shape: &'a TensorShape) -> Self {
         match &shape.inner {
             Some(tensor_shape::Inner::LabeledShape(tensor_shape::LabeledShapeInner {
@@ -113,7 +113,7 @@ impl LabeledShape {
     }
 }
 
-impl<'a> From<&'a proto::common::LabeledShape> for LoweredShape {
+impl<'a> From<&'a proto::common::LabeledShape> for TensorIndexer {
     fn from(shape: &'a proto::common::LabeledShape) -> Self {
         let shape: LabeledShape = shape.into();
         assert!(shape.is_nchw());
@@ -123,8 +123,8 @@ impl<'a> From<&'a proto::common::LabeledShape> for LoweredShape {
             hi_stride: shape.width().unwrap(),
             ci_stride: shape.height().unwrap() * shape.width().unwrap(),
             w_stride: 1,
-            slice_height: shape.height().unwrap(),
-            slice_channel: shape.channel().unwrap(),
+            hi_limit: shape.height().unwrap(),
+            ci_limit: shape.channel().unwrap(),
         }
     }
 }
@@ -200,7 +200,7 @@ impl LoweredActivationShape {
     }
 }
 
-impl<'a> From<&'a proto::common::LoweredActivationShape> for LoweredShape {
+impl<'a> From<&'a proto::common::LoweredActivationShape> for TensorIndexer {
     fn from(shape: &'a proto::common::LoweredActivationShape) -> Self {
         let shape: LoweredActivationShape = shape.into();
         if shape.is_nhoco_hcw() {
@@ -210,8 +210,8 @@ impl<'a> From<&'a proto::common::LoweredActivationShape> for LoweredShape {
                 hi_stride: shape.slice_channel() * shape.slice_width(),
                 ci_stride: shape.slice_width(),
                 w_stride: 1,
-                slice_height: shape.slice_height(),
-                slice_channel: shape.slice_channel(),
+                hi_limit: shape.slice_height(),
+                ci_limit: shape.slice_channel(),
             }
         } else if shape.is_nhoco_hwc() {
             Self {
@@ -220,8 +220,8 @@ impl<'a> From<&'a proto::common::LoweredActivationShape> for LoweredShape {
                 hi_stride: shape.slice_channel() * shape.slice_width(),
                 w_stride: shape.slice_channel(),
                 ci_stride: 1,
-                slice_height: shape.slice_height(),
-                slice_channel: shape.unaligned_slice_channel(),
+                hi_limit: shape.slice_height(),
+                ci_limit: shape.unaligned_slice_channel(),
             }
         } else {
             unimplemented!("Unsupported lowered shape: {:?}", shape);
@@ -229,12 +229,12 @@ impl<'a> From<&'a proto::common::LoweredActivationShape> for LoweredShape {
     }
 }
 
-impl LoweredShape {
+impl TensorIndexer {
     pub fn index(&self, c: usize, h: usize, w: usize) -> usize {
-        let ho = h / self.slice_height;
-        let hi = h % self.slice_height;
-        let co = c / self.slice_channel;
-        let ci = c % self.slice_channel;
+        let ho = h / self.hi_limit;
+        let hi = h % self.hi_limit;
+        let co = c / self.ci_limit;
+        let ci = c % self.ci_limit;
         ho * self.ho_stride
             + co * self.co_stride
             + hi * self.hi_stride

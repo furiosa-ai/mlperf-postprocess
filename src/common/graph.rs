@@ -5,7 +5,7 @@ use eyre::ensure;
 use prost::Message;
 
 use crate::common::proto::{self, dfg};
-use crate::common::shape::LoweredShape;
+use crate::common::shape::TensorIndexer;
 
 pub type TensorIndex = u32;
 
@@ -42,7 +42,7 @@ impl<'a> From<&'a proto::common::ElementType> for ElementType {
 
 #[derive(Debug, Default, Clone)]
 pub struct TensorInfo {
-    shape: LoweredShape,
+    shape: TensorIndexer,
     element_type: ElementType,
 }
 
@@ -60,7 +60,7 @@ impl TensorInfo {
         self.element_type.get_scale_and_zero_point()
     }
 
-    pub fn get_lowered_shape(&self) -> LoweredShape {
+    pub fn get_lowered_shape(&self) -> TensorIndexer {
         self.shape
     }
 }
