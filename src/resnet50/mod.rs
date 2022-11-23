@@ -1,6 +1,6 @@
 use crate::common::graph::GraphInfo;
 use crate::common::model::ModelOutputInfo;
-use crate::common::{graph::TensorInfo, shape::TensorIndexer};
+use crate::common::shape::TensorIndexer;
 
 #[derive(Default, Debug, Clone)]
 pub struct Resnet50PostProcessor {
@@ -9,10 +9,8 @@ pub struct Resnet50PostProcessor {
 
 impl Resnet50PostProcessor {
     pub fn new(graph: &GraphInfo) -> Self {
-        assert_eq!(graph.outputs.len(), 1, "number of output tensors should be 1");
-
-        let output_tensor: TensorInfo = graph.tensors.get(&graph.outputs[0]).unwrap().into();
-        Self { lowered_output_shape: output_tensor.get_lowered_shape() }
+        let model: ModelOutputInfo = graph.into();
+        Self::from(&model)
     }
 
     pub fn postprocess(&self, output: &[u8]) -> usize {

@@ -8,7 +8,6 @@ use itertools::Itertools;
 use rayon::prelude::*;
 
 use crate::common::graph::GraphInfo;
-use crate::common::graph::TensorInfo;
 use crate::common::model::ModelOutputInfo;
 use crate::common::ssd_postprocess::{
     BoundingBox, CenteredBox, DetectionResult, DetectionResults, Postprocess,
@@ -48,69 +47,8 @@ pub struct RustPostprocessor {
 
 impl RustPostprocessor {
     pub fn new(main: &GraphInfo) -> Self {
-        assert_eq!(main.outputs.len(), NUM_OUTPUTS);
-
-        let mut output_deq_tables = [[0f32; 256]; NUM_OUTPUTS];
-        let mut output_exp_deq_tables = [[0f32; 256]; NUM_OUTPUTS];
-        let mut output_exp_scale_deq_tables = [[0f32; 256]; NUM_OUTPUTS];
-        let mut score_lowered_shapes = [Default::default(); NUM_OUTPUTS / 2];
-        let mut box_lowered_shapes = [Default::default(); NUM_OUTPUTS / 2];
-        for (i, tensor_index) in main.outputs.iter().enumerate() {
-            let tensor: TensorInfo = main.tensors.get(tensor_index).unwrap().into();
-            let (s, z) = tensor.get_scale_and_zero_point();
-            let mut table = [0f32; 256];
-            let mut exp_table = [0f32; 256];
-            let mut exp_scale_table = [0f32; 256];
-            for q in -128..=127 {
-                let x = (s * f64::from(q - z)) as f32;
-                let index = (q as u8) as usize;
-                if i < 6 {
-                    table[index] = x;
-                } else {
-                    table[index] = x * SCALE_XY;
-                }
-                exp_table[index] = f32::exp(x);
-                exp_scale_table[index] = f32::exp(x * SCALE_WH);
-            }
-            output_deq_tables[i] = table;
-            output_exp_deq_tables[i] = exp_table;
-            output_exp_scale_deq_tables[i] = exp_scale_table;
-            if let Some(i) = i.checked_sub(NUM_OUTPUTS / 2) {
-                box_lowered_shapes[i] = tensor.get_lowered_shape();
-            } else {
-                score_lowered_shapes[i] = tensor.get_lowered_shape();
-            }
-        }
-
-        let mut output_base_index = [0usize; 7];
-        for i in 0..6 {
-            output_base_index[i + 1] = output_base_index[i]
-                + NUM_ANCHORS[i] * FEATURE_MAP_SHAPES[i] * FEATURE_MAP_SHAPES[i];
-        }
-
-        let box_priors = include_bytes!("../../models/ssd_large_precomputed_priors")
-            .chunks(SIZE_OF_F32 * 4)
-            .map(|bytes| {
-                let (pcy, pcx, ph, pw) = bytes
-                    .chunks(SIZE_OF_F32)
-                    .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
-                    .tuples()
-                    .next()
-                    .unwrap();
-                CenteredBox { pcy, pcx, ph, pw }.into_transposed()
-            })
-            .collect();
-
-        Self {
-            output_deq_tables,
-            output_exp_deq_tables,
-            output_exp_scale_deq_tables,
-            output_base_index,
-            score_lowered_shapes,
-            box_lowered_shapes,
-            box_priors,
-            parallel_processing: false,
-        }
+        let model: ModelOutputInfo = main.into();
+        Self::from(&model)
     }
 
     #[must_use]
@@ -395,79 +333,8 @@ pub mod cxx {
 
     impl CppPostprocessor {
         pub fn new(main: &GraphInfo) -> Self {
-            assert_eq!(main.outputs.len(), NUM_OUTPUTS);
-
-            let mut output_deq_tables = [[0f32; 256]; NUM_OUTPUTS];
-            let mut output_exp_deq_tables = [[0f32; 256]; NUM_OUTPUTS];
-            let mut output_exp_scale_deq_tables = [[0f32; 256]; NUM_OUTPUTS];
-            let mut score_lowered_shapes: [TensorIndexer; NUM_OUTPUTS / 2] =
-                [Default::default(); NUM_OUTPUTS / 2];
-            let mut box_lowered_shapes: [TensorIndexer; NUM_OUTPUTS / 2] =
-                [Default::default(); NUM_OUTPUTS / 2];
-
-            for (i, tensor_index) in main.outputs.iter().enumerate() {
-                let tensor: TensorInfo = main.tensors.get(tensor_index).unwrap().into();
-                let (s, z) = tensor.get_scale_and_zero_point();
-                let mut table = [0f32; 256];
-                let mut exp_table = [0f32; 256];
-                let mut exp_scale_table = [0f32; 256];
-                for q in -128..=127 {
-                    let index = (q as u8) as usize;
-                    let x = (s * f64::from(q - z)) as f32;
-                    if i < 6 {
-                        table[index] = x;
-                    } else {
-                        table[index] = x * SCALE_XY;
-                    };
-                    exp_table[index] = f32::exp(x);
-                    exp_scale_table[index] = f32::exp(x * SCALE_WH);
-                }
-                if let Some(i) = i.checked_sub(NUM_OUTPUTS / 2) {
-                    box_lowered_shapes[i] = tensor.get_lowered_shape();
-                } else {
-                    score_lowered_shapes[i] = tensor.get_lowered_shape();
-                }
-
-                output_deq_tables[i] = table;
-                output_exp_deq_tables[i] = exp_table;
-                output_exp_scale_deq_tables[i] = exp_scale_table;
-            }
-
-            let mut output_base_index = [0usize; 7];
-            for i in 0..6 {
-                output_base_index[i + 1] = output_base_index[i]
-                    + NUM_ANCHORS[i] * FEATURE_MAP_SHAPES[i] * FEATURE_MAP_SHAPES[i];
-            }
-
-            {
-                let score_lowered_shapes_ptr = score_lowered_shapes.as_ptr();
-                let box_lowered_shapes_ptr = box_lowered_shapes.as_ptr();
-                let output_deq_tables_ptr = output_deq_tables.as_ptr();
-                let output_exp_deq_tables_ptr = output_exp_deq_tables.as_ptr();
-                let output_exp_scale_deq_tables_ptr = output_exp_scale_deq_tables.as_ptr();
-                let box_priors: Vec<f32> =
-                    include_bytes!("../../models/ssd_large_precomputed_priors")
-                        .chunks(SIZE_OF_F32 * 4)
-                        .flat_map(|bytes| {
-                            let (pcy, pcx, ph, pw) = bytes
-                                .chunks(SIZE_OF_F32)
-                                .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
-                                .tuples()
-                                .next()
-                                .unwrap();
-                            CenteredBox { pcy, pcx, ph, pw }.into_transposed().to_vec()
-                        })
-                        .collect();
-
-                let box_priors_ptr = box_priors.as_ptr();
-
-                cpp!(unsafe [output_deq_tables_ptr as "float*", output_exp_deq_tables_ptr as "float*", output_exp_scale_deq_tables_ptr as "float*", score_lowered_shapes_ptr as "LoweredShapeFromRust*", box_lowered_shapes_ptr as "LoweredShapeFromRust*", box_priors_ptr as "CenteredBox*"] {
-                    ssd_large::init(output_deq_tables_ptr, output_exp_deq_tables_ptr, output_exp_scale_deq_tables_ptr, score_lowered_shapes_ptr, box_lowered_shapes_ptr, box_priors_ptr);
-
-                });
-            }
-
-            Self
+            let model: ModelOutputInfo = main.into();
+            Self::from(&model)
         }
     }
 

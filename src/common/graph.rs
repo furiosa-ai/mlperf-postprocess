@@ -62,14 +62,14 @@ pub struct GraphInfo {
 }
 
 #[allow(clippy::from_over_into)]
-impl Into<ModelOutputInfo> for GraphInfo {
+impl<'a> Into<ModelOutputInfo> for &'a GraphInfo {
     fn into(self) -> ModelOutputInfo {
         let mut outputs = Vec::new();
 
-        for output in self.outputs {
+        for output in self.outputs.iter() {
             let tensor_info: TensorInfo = self
                 .tensors
-                .get(&output)
+                .get(output)
                 .expect("Output tensor should exist in the tensor map")
                 .into();
             outputs.push(TensorMeta {
