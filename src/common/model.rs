@@ -12,6 +12,15 @@ pub enum ElementType {
     Int8 { quantization_parameter: QuantizationParameter },
 }
 
+impl ElementType {
+    pub fn get_scale_and_zero_point(&self) -> (f64, i32) {
+        let ElementType::Int8 { quantization_parameter} = self else {
+            todo!("Currently only supports Int8");
+        };
+        (quantization_parameter.scale, quantization_parameter.zero_point)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TensorMeta {
     pub indexer: TensorIndexer,
@@ -20,10 +29,7 @@ pub struct TensorMeta {
 
 impl TensorMeta {
     pub fn get_scale_and_zero_point(&self) -> (f64, i32) {
-        let ElementType::Int8 { quantization_parameter } = self.element_type else {
-            todo!("Currently only supports Int8");
-        };
-        (quantization_parameter.scale, quantization_parameter.zero_point)
+        self.element_type.get_scale_and_zero_point()
     }
 }
 
