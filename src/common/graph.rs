@@ -4,22 +4,12 @@ use crc::{self, Crc};
 use eyre::ensure;
 use prost::Message;
 
+use super::model::{ModelOutputInfo, TensorMeta};
+use crate::common::model::{ElementType, QuantizationParameter};
 use crate::common::proto::{self, dfg};
-use crate::common::shape::LoweredShape;
+use crate::common::shape::TensorIndexer;
 
 pub type TensorIndex = u32;
-
-#[derive(Debug, Default, Clone)]
-pub struct ElementType {
-    scale: f64,
-    zero_point: i32,
-}
-
-impl ElementType {
-    fn get_scale_and_zero_point(&self) -> (f64, i32) {
-        (self.scale, self.zero_point)
-    }
-}
 
 impl<'a> From<&'a proto::common::ElementType> for ElementType {
     fn from(element_type: &'a proto::common::ElementType) -> Self {
@@ -33,16 +23,16 @@ impl<'a> From<&'a proto::common::ElementType> for ElementType {
 
                 let scale = (max - min) / (i8::max_value() as f64 - i8::min_value() as f64);
                 let zero_point = i8::min_value() as i32 - (min / scale).round() as i32;
-                Self { scale, zero_point }
+                Self::Int8 { quantization_parameter: QuantizationParameter { scale, zero_point } }
             }
             _ => unimplemented!("Only Int8 output type supported"),
         }
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct TensorInfo {
-    shape: LoweredShape,
+    shape: TensorIndexer,
     element_type: ElementType,
 }
 
@@ -60,15 +50,36 @@ impl TensorInfo {
         self.element_type.get_scale_and_zero_point()
     }
 
-    pub fn get_lowered_shape(&self) -> LoweredShape {
+    pub fn get_lowered_shape(&self) -> TensorIndexer {
         self.shape
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct GraphInfo {
     pub outputs: Vec<TensorIndex>,
     pub tensors: HashMap<TensorIndex, proto::common::Tensor>,
+}
+
+#[allow(clippy::from_over_into)]
+impl<'a> Into<ModelOutputInfo> for &'a GraphInfo {
+    fn into(self) -> ModelOutputInfo {
+        let mut outputs = Vec::new();
+
+        for output in self.outputs.iter() {
+            let tensor_info: TensorInfo = self
+                .tensors
+                .get(output)
+                .expect("Output tensor should exist in the tensor map")
+                .into();
+            outputs.push(TensorMeta {
+                indexer: tensor_info.shape,
+                element_type: tensor_info.element_type,
+            })
+        }
+
+        ModelOutputInfo { outputs }
+    }
 }
 
 pub fn create_graph_from_binary(input: &[u8]) -> eyre::Result<GraphInfo> {
@@ -89,15 +100,7 @@ pub fn create_graph_from_binary_with_header(input: &[u8]) -> eyre::Result<GraphI
     assert_eq!(header.magic_number, BinaryHeader::create_magic_number(EXTENSION_DFG));
     ensure!(header.crc == BinaryHeader::create_crc(body), "Error: cyclic redundancy check failed",);
 
-    let graph = dfg::Graph::decode(body)?;
-
-    let tensors = graph
-        .tensors
-        .iter()
-        .map(|(&tensor_index, tensor)| (tensor_index, tensor.clone()))
-        .collect::<HashMap<TensorIndex, proto::common::Tensor>>();
-
-    Ok(GraphInfo { outputs: graph.outputs, tensors })
+    create_graph_from_binary(body)
 }
 
 // Belows are copied from npu-tools

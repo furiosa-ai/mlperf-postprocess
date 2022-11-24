@@ -35,7 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     prost_config.type_attribute(".", "#[allow(clippy::large_enum_variant)]");
     prost_config.out_dir(&out_dir);
-    prost_config.btree_map(&[".npu_ir"]);
+    prost_config.btree_map([".npu_ir"]);
     prost_config.compile_protos(proto_files, &proto_includes)?;
 
     Ok(())
