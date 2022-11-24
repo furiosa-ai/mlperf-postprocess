@@ -297,7 +297,7 @@ pub mod cxx {
 
     impl CppPostprocessor {
         pub fn new(main: &GraphInfo) -> Self {
-            let model: ModelOutputInfo = graph.into();
+            let model: ModelOutputInfo = main.into();
             Self::from(&model)
         }
     }
