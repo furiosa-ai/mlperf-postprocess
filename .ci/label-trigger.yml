@@ -1,0 +1,226 @@
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: Trigger
+metadata:
+  name: mlperf-postprocess-ci-build-wheel
+  namespace: ci-mlperf-postprocess
+  labels:
+    ci.tekton.dev/trigger-type: github.pull-request
+spec:
+  interceptors:
+    - cel:
+        filter: "body.repository.full_name in ['furiosa-ai/mlperf-postprocess']
+          && body.action in ['labeled']
+          && body.label.name.startsWith('build-wheel')"
+  bindings:
+    - ref: tekton-ci-github-base
+      kind: ClusterTriggerBinding
+    - ref: tekton-ci-webhook-pull-request
+      kind: ClusterTriggerBinding
+  template:
+    ref: mlperf-postprocess-ci-build-wheel
+---
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerTemplate
+metadata:
+  name: mlperf-postprocess-ci-build-wheel
+  namespace: ci-mlperf-postprocess
+spec:
+  params:
+  - name: repo_full_name
+    description: The git repository name
+  - name: gitRepository
+    description: The git repository that hosts context and Dockerfile
+  - name: gitRevision
+    description: The git revision to be used.
+  - name: gitShortRevision
+    description: The git short revision to be used.
+  - name: triggerContext
+    description: Trigger context came from status trigger binding
+  - name: headRef
+    description: The git head ref (branch name)
+  - name: prNumber
+    description: pr number
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1beta1
+      kind: PipelineRun
+      metadata:
+        generateName: "build-wheel-$(tt.params.triggerContext)-$(tt.params.gitShortRevision)-"
+      spec:
+        params:
+          - name: repo_full_name
+            value: "$(tt.params.repo_full_name)"
+          - name: gitRepository
+            value: "$(tt.params.gitRepository)"
+          - name: gitRevision
+            value: "$(tt.params.gitRevision)"
+          - name: gitShortRevision
+            value: "$(tt.params.gitShortRevision)"
+          - name: triggerContext
+            value: "build-wheel-$(tt.params.triggerContext)"
+          - name: headRef
+            value: "$(tt.params.headRef)"
+          - name: prNumber
+            value: "$(tt.params.prNumber)"
+        workspaces:
+          - name: source
+            volumeClaimTemplate:
+              spec:
+                accessModes:
+                  - ReadWriteMany
+                resources:
+                  requests:
+                    storage: 10Gi
+          - name: aws-credential
+            secret:
+              secretName: aws-credential
+          - name: furiosa-apt-credential
+            secret:
+              secretName: furiosa-apt-credential
+          - name: internal-pypi-secret
+            secret:
+              secretName: internal-pypi-secret
+        serviceAccountName: build-bot
+        pipelineRef:
+          name: mlperf-postprocess-build-wheel
+        timeouts:
+          pipeline: 5h
+---
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: mlperf-postprocess-build-wheel
+  namespace: ci-mlperf-postprocess
+  annotations:
+    description: |
+      Build python wheel with maturin
+spec:
+  params:
+    - name: repo_full_name
+      description: The git repository name
+    - name: gitRepository
+      description: The git repository that hosts context and Dockerfile
+      default: git@github.com:furiosa-ai/mlperf-postprocess.git
+    - name: gitRevision
+      description: The Git revision to be used.
+      default: master
+    - name: triggerContext
+      description: Trigger context came from status trigger binding
+    - name: headRef
+      description: The git head ref (branch name)
+    - name: gitCloneDepth
+      description: Number of commits in the change + 1
+      default: "1"
+    - name: prNumber
+      description: pr number
+      
+  workspaces:
+    - name: source
+      description: Workspace where the git repo is prepared for testing
+    - name: aws-credential
+      description: AWS credentials for s3 access
+    - name: furiosa-apt-credential
+      description: APT credential for FuriosaAI private repository
+    - name: internal-pypi-secret
+      description: For internal pypi access
+
+  tasks:
+  - name: set-status-begin
+    taskRef:
+      name: github-set-status
+    params:
+    - name: REPO_FULL_NAME
+      value: $(params.repo_full_name)
+    - name: SHA
+      value: $(params.gitRevision)
+    - name: TARGET_URL
+      value: https://tekton.office.furiosa.in/#/namespaces/ci-mlperf-postprocess/pipelineruns/$(context.pipelineRun.name)
+    - name: GITHUB_TOKEN_SECRET_NAME
+      value: "github-credential"
+    - name: GITHUB_TOKEN_SECRET_KEY
+      value: "password"
+    - name: DESCRIPTION
+      value: "begin"
+    - name: CONTEXT
+      value: "mlperf-postprocess-ci-build-wheel"
+    - name: STATE
+      value: pending
+
+  - name: clone
+    taskRef:
+      name: git-clone
+    workspaces:
+      - name: output
+        workspace: source
+    params:
+    - name: url
+      value: $(params.gitRepository)
+    - name: revision
+      value: $(params.gitRevision)
+    - name: depth
+      value: $(params.gitCloneDepth)
+
+  - name: build-wheel 
+    taskRef:
+      name: build-wheel
+    workspaces:
+      - name: source
+        workspace: source
+      - name: aws-credential
+        workspace: aws-credential
+      - name: furiosa-apt-credential
+        workspace: furiosa-apt-credential
+      - name: internal-pypi-secret
+        workspace: internal-pypi-secret
+        subPath: .netrc
+    runAfter:
+      - clone
+
+  finally:
+  - name: set-status-success
+    taskRef:
+      name: github-set-status
+    params:
+    - name: REPO_FULL_NAME
+      value: $(params.repo_full_name)
+    - name: SHA
+      value: $(params.gitRevision)
+    - name: TARGET_URL
+      value: https://tekton.office.furiosa.in/#/namespaces/ci-mlperf-postprocess/pipelineruns/$(context.pipelineRun.name)
+    - name: GITHUB_TOKEN_SECRET_NAME
+      value: "github-credential"
+    - name: GITHUB_TOKEN_SECRET_KEY
+      value: "password"
+    - name: DESCRIPTION
+      value: "succeeded"
+    - name: CONTEXT
+      value: "mlperf-postprocess-ci-build-wheel"
+    - name: STATE
+      value: success
+    when:
+    - input: $(tasks.status)
+      operator: notin
+      values: ["Failed"]
+  - name: set-status-failed
+    taskRef:
+      name: github-set-status
+    params:
+    - name: REPO_FULL_NAME
+      value: $(params.repo_full_name)
+    - name: SHA
+      value: $(params.gitRevision)
+    - name: TARGET_URL
+      value: https://tekton.office.furiosa.in/#/namespaces/ci-mlperf-postprocess/pipelineruns/$(context.pipelineRun.name)
+    - name: GITHUB_TOKEN_SECRET_NAME
+      value: "github-credential"
+    - name: GITHUB_TOKEN_SECRET_KEY
+      value: "password"
+    - name: DESCRIPTION
+      value: "failed"
+    - name: CONTEXT
+      value: "mlperf-postprocess-ci-build-wheel"
+    - name: STATE
+      value: failure
+    when:
+    - input: $(tasks.status)
+      operator: in
+      values: ["Failed"]
