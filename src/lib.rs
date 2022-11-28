@@ -1,5 +1,6 @@
 #![deny(unused_extern_crates)]
 #![feature(vec_into_raw_parts)]
+#![allow(clippy::borrow_deref_ref)]
 
 use pyo3::prelude::*;
 
