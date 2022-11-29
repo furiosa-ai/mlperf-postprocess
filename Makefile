@@ -20,3 +20,9 @@ docker-build: check-docker-tag
 
 docker-push: check-docker-tag
 	docker push asia-northeast3-docker.pkg.dev/next-gen-infra/furiosa-ai/mlperf-postprocess:${DOCKER_TAG}
+
+docker-wheel:
+	docker build -t mlperf-postprocess-wheel -f docker/wheel.Dockerfile .
+
+wheel: docker-wheel
+	docker run --rm -it -v `pwd`/wheels:/app/target/wheels mlperf-postprocess-wheel maturin build --release --manylinux 2014
