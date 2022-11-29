@@ -5,16 +5,18 @@ use std::convert::TryInto;
 use std::mem;
 
 use itertools::Itertools;
+use pyo3::{exceptions::PyValueError, prelude::*, types::PyList};
 use rayon::prelude::*;
 
-use crate::common::graph::GraphInfo;
+use crate::common::graph::{create_graph_from_binary_with_header, GraphInfo};
 use crate::common::model::ModelOutputInfo;
 use crate::common::ssd_postprocess::{
     BoundingBox, CenteredBox, DetectionResult, DetectionResults, Postprocess,
 };
 use crate::common::{
+    convert_to_slices,
     shape::{Shape, TensorIndexer},
-    uninitialized_vec,
+    uninitialized_vec, PyDetectionResult,
 };
 
 const FEATURE_MAP_SHAPES: [usize; 6] = [50, 25, 13, 7, 3, 3];
@@ -410,8 +412,113 @@ pub mod cxx {
 
                 });
             }
-
             Self
         }
     }
+
+    #[pymethods]
+    impl CppPostProcessor {
+        #[new]
+        fn new(dfg: &[u8]) -> PyResult<Self> {
+            let graph = create_graph_from_binary_with_header(dfg)
+                .map_err(|e| PyErr::new::<PyValueError, _>(format!("invalid DFG format: {}", e)))?;
+
+            Ok(Self(CppPostprocessor::new(&graph)))
+        }
+
+        /// Evaluate the postprocess
+        ///
+        /// Args:
+        ///     inputs (Sequence[numpy.ndarray]): Input tensors
+        ///
+        /// Returns:
+        ///     List[PyDetectionResult]: Output tensors
+        #[pyo3(text_signature = "(self, inputs: Sequence[numpy.ndarray])")]
+        fn eval(&self, inputs: &PyList) -> PyResult<Vec<PyDetectionResult>> {
+            if inputs.len() != OUTPUT_NUM {
+                return Err(PyErr::new::<PyValueError, _>(format!(
+                    "expected {} input tensors but got {}",
+                    OUTPUT_NUM,
+                    inputs.len()
+                )));
+            }
+
+            let slices = convert_to_slices(inputs)?;
+            Ok(self
+                .0
+                .postprocess(0f32, &slices)
+                .0
+                .into_iter()
+                .map(PyDetectionResult::new)
+                .collect())
+        }
+    }
+
+    /// CppPostProcessor
+    ///
+    /// It takes a DFG whose unlower part is removed.
+    /// The DFG binary must have magic number in its head.
+    ///
+    /// Args:
+    ///     dfg (bytes): a binary of DFG IR
+    #[pyclass]
+    #[pyo3(text_signature = "(dfg: bytes)")]
+    pub struct CppPostProcessor(CppPostprocessor);
+}
+
+const OUTPUT_NUM: usize = 12;
+
+/// RustPostProcessor
+///
+/// It takes a DFG whose unlower part is removed.
+/// The DFG binary must have magic number in its head.
+///
+/// Args:
+///     dfg (bytes): a binary of DFG IR
+#[pyclass]
+#[pyo3(text_signature = "(dfg: bytes)")]
+pub struct RustPostProcessor(RustPostprocessor);
+
+#[pymethods]
+impl RustPostProcessor {
+    #[new]
+    fn new(dfg: &[u8]) -> PyResult<Self> {
+        let graph = create_graph_from_binary_with_header(dfg)
+            .map_err(|e| PyErr::new::<PyValueError, _>(format!("invalid DFG format: {}", e)))?;
+
+        Ok(Self(RustPostprocessor::new(&graph)))
+    }
+
+    /// Evaluate the postprocess
+    ///
+    /// Args:
+    ///     inputs (Sequence[numpy.ndarray]): Input tensors
+    ///
+    /// Returns:
+    ///     List[PyDetectionResult]: Output tensors
+    #[pyo3(text_signature = "(self, inputs: Sequence[numpy.ndarray])")]
+    fn eval(&self, inputs: &PyList) -> PyResult<Vec<PyDetectionResult>> {
+        if inputs.len() != OUTPUT_NUM {
+            return Err(PyErr::new::<PyValueError, _>(format!(
+                "expected {} input tensors but got {}",
+                OUTPUT_NUM,
+                inputs.len()
+            )));
+        }
+
+        let slices = convert_to_slices(inputs)?;
+        Ok(self.0.postprocess(0f32, &slices).0.into_iter().map(PyDetectionResult::new).collect())
+    }
+}
+
+#[pymodule]
+pub(crate) fn ssd_resnet34(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
+    m.add_class::<RustPostProcessor>()?;
+
+    #[cfg(feature = "cpp_impl")]
+    {
+        m.add_class::<cxx::CppPostProcessor>()?;
+    }
+
+    Ok(())
 }

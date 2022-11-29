@@ -76,3 +76,43 @@ spec:
         limits:
           memory: 32Gi
           cpu: 8
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: build-wheel
+  namespace: ci-mlperf-postprocess
+spec:
+  workspaces:
+    - name: source
+    - name: furiosa-apt-credential
+      mountPath: /etc/apt/auth.conf.d
+      readOnly: true
+    - name: aws-credential
+      mountPath: /root/.aws
+    - name: internal-pypi-secret
+      mountPath: /root/.netrc
+      readOnly: true
+  params:
+    - name: image
+      description: The container image to use black in
+      default: asia-northeast3-docker.pkg.dev/next-gen-infra/furiosa-ai/mlperf-postprocess:221102
+  steps:
+    - name: build-wheel
+      env:
+        - name: "PIP_EXTRA_INDEX_URL"
+          value: "https://internal-pypi.furiosa.dev/simple"
+      image: $(params.image)
+      script: |
+        #!/usr/bin/env bash
+        set -e
+        cd /workspace/source
+        pip install maturin
+        maturin build --release
+      resources:
+        requests:
+          memory: 32Gi
+          cpu: 8
+        limits:
+          memory: 32Gi
+          cpu: 8
