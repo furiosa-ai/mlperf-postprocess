@@ -19,5 +19,5 @@ WORKDIR /app
 COPY . .
 
 # Add protos
-# COPY /usr/share/furiosa /usr/share/furiosa
-COPY share/furiosa /usr/share/furiosa
+COPY /usr/share/furiosa /usr/share/furiosa
+# COPY share/furiosa /usr/share/furiosa

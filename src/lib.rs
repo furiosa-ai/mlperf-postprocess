@@ -10,7 +10,7 @@ pub mod ssd_large;
 pub mod ssd_small;
 
 #[pymodule]
-fn furiosa_mlperf_postprocess(py: Python<'_>, m: &PyModule) -> PyResult<()> {
+fn furiosa_native_postprocess(py: Python<'_>, m: &PyModule) -> PyResult<()> {
     let py_sys_module = py.import("sys")?.getattr("modules")?;
     let ssd_mobilenet_module = pyo3::wrap_pymodule!(ssd_small::ssd_mobilenet);
     let ssd_resnet34_module = pyo3::wrap_pymodule!(ssd_large::ssd_resnet34);

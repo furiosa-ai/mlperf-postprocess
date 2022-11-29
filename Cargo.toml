@@ -1,5 +1,5 @@
 [package]
-name = "furiosa-mlperf-postprocess"
+name = "furiosa-native-postprocess"
 version = "0.1.0"
 edition = "2021"
 build = "build.rs"
@@ -11,7 +11,7 @@ cpp_impl = ["cpp", "cpp_build", "cbindgen"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
-name = "furiosa_mlperf_postprocess"
+name = "furiosa_native_postprocess"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
