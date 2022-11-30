@@ -1,11 +1,24 @@
 ### Requirements
 
-To install furiosa pkgs, see apt repo setup guide in Notion
+To install furiosa packages, see the apt repo setup guide in Notion
+
 ```
 apt install furiosa-libnux-extrinsic
 ```
 
-To build maturin package, please run the following
+### Build & publish
+
+To build wheels, please run the following
+
 ```
-maturin build --release -- --cargo-extra-args="--features python-extension"
+maturin build --release
 ```
+
+We provide a dedicated Dockerfile and build script to automate building manylinux-compatible wheels.
+If you have `docker` and `furiosa-libnux-extrinsic` packages installed, you can build manylinux wheels by running the following
+
+```
+make wheel
+```
+
+The output packages(source distribution + wheels) will be saved to the `./wheels` directory.

@@ -1,7 +1,7 @@
 FROM quay.io/pypa/manylinux2014_x86_64
 
 # Install procobuf compiler & python3-pip
-RUN yum update \
+RUN yum update -y \
     && yum install -y https://cbs.centos.org/kojifiles/packages/protobuf/3.6.1/4.el7/x86_64/protobuf-3.6.1-4.el7.x86_64.rpm \
     && yum install -y https://cbs.centos.org/kojifiles/packages/protobuf/3.6.1/4.el7/x86_64/protobuf-compiler-3.6.1-4.el7.x86_64.rpm \
     && yum install -y https://cbs.centos.org/kojifiles/packages/protobuf/3.6.1/4.el7/x86_64/protobuf-devel-3.6.1-4.el7.x86_64.rpm \
@@ -18,6 +18,6 @@ ENV PATH=/root/.cargo/bin:$PATH
 WORKDIR /app
 COPY . .
 
-# Add protos
+# Add protos (make sure you have installed furiosa-libnux-extrinsic)
 COPY /usr/share/furiosa /usr/share/furiosa
 # COPY share/furiosa /usr/share/furiosa
