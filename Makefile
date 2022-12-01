@@ -23,7 +23,7 @@ docker-push: check-docker-tag
 	docker push asia-northeast3-docker.pkg.dev/next-gen-infra/furiosa-ai/mlperf-postprocess:${DOCKER_TAG}
 
 docker-wheel:
-	DOCKER_BUILDKIT=1 docker build -t mlperf-postprocess-wheel -f docker/wheel.Dockerfile .
+	DOCKER_BUILDKIT=1 docker build -t mlperf-postprocess-wheel -f docker/wheel.Dockerfile docker
 
 wheel: docker-wheel
 	docker run --rm -it \
