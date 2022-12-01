@@ -10,7 +10,8 @@ endif
 toolchain:
 
 lint:
-	cargo fmt --all --check && cargo -q clippy --release --features cpp_impl --all-targets -- -D rust_2018_idioms -D warnings
+	cargo fmt --all --check \
+	&& cargo -q clippy --release --features cpp_impl --all-targets -- -D rust_2018_idioms -D warnings
 
 test:
 	cargo test --release --features cpp_impl
@@ -22,7 +23,12 @@ docker-push: check-docker-tag
 	docker push asia-northeast3-docker.pkg.dev/next-gen-infra/furiosa-ai/mlperf-postprocess:${DOCKER_TAG}
 
 docker-wheel:
-	docker build -t mlperf-postprocess-wheel -f docker/wheel.Dockerfile .
+	DOCKER_BUILDKIT=1 docker build -t mlperf-postprocess-wheel -f docker/wheel.Dockerfile .
 
 wheel: docker-wheel
-	docker run --rm -it -v `pwd`/wheels:/app/target/wheels mlperf-postprocess-wheel maturin build --release --manylinux 2014
+	docker run --rm -it \
+		-v /usr/share/furiosa:/usr/share/furiosa \
+		-v `pwd`/wheels:/app/target/wheels \
+		-v `pwd`:/app \
+		mlperf-postprocess-wheel \
+		maturin build --release --manylinux 2014

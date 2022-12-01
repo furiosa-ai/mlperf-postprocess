@@ -14,10 +14,5 @@ RUN pip3 install --upgrade pip && pip3 install --upgrade maturin
 RUN curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
 ENV PATH=/root/.cargo/bin:$PATH
 
-# Set working directory, copy files
+# Set working directory
 WORKDIR /app
-COPY . .
-
-# Add protos (make sure you have installed furiosa-libnux-extrinsic)
-COPY /usr/share/furiosa /usr/share/furiosa
-# COPY share/furiosa /usr/share/furiosa
