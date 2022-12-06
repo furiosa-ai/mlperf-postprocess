@@ -7,13 +7,13 @@ use crate::common::proto::common::{tensor_shape, TensorShape};
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct TensorIndexer {
-    ho_stride: usize,
-    co_stride: usize,
-    hi_stride: usize,
-    ci_stride: usize,
-    w_stride: usize,
-    hi_limit: usize,
-    ci_limit: usize,
+    pub ho_stride: usize,
+    pub co_stride: usize,
+    pub hi_stride: usize,
+    pub ci_stride: usize,
+    pub w_stride: usize,
+    pub hi_limit: usize,
+    pub ci_limit: usize,
 }
 
 impl<'a> From<&'a TensorShape> for TensorIndexer {
