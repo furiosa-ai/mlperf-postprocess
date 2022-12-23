@@ -20,7 +20,7 @@ use crate::common::ssd_postprocess::{BoundingBox, CenteredBox};
     text_signature = "(anchors: numpy.ndarray, class_names: Sequence[str], strides: numpy.ndarray)"
 )]
 #[derive(Debug, Clone)]
-pub struct YOLOv5PostProcessor {
+pub struct RustPostProcessor {
     #[pyo3(get)]
     pub num_classes: usize,
     #[pyo3(get)]
@@ -36,11 +36,11 @@ pub struct YOLOv5PostProcessor {
     pub strides: Vec<f32>,
 }
 
-impl fmt::Display for YOLOv5PostProcessor {
+impl fmt::Display for RustPostProcessor {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "YOLOv5PostProcessor {{ num_classes: {}, num_outputs: {}, \
+            "RustPostProcessor {{ num_classes: {}, num_outputs: {}, \
             num_detection_layers: {}, num_anchor: {}, strides: {:?} }}",
             self.num_classes,
             self.num_outputs,
@@ -73,13 +73,9 @@ where
 }
 
 #[pymethods]
-impl YOLOv5PostProcessor {
+impl RustPostProcessor {
     #[new]
-    fn new(
-        anchors: PyReadonlyArray3<f32>,
-        class_names: Vec<String>,
-        strides: Vec<f32>,
-    ) -> Self {
+    fn new(anchors: PyReadonlyArray3<f32>, class_names: Vec<String>, strides: Vec<f32>) -> Self {
         let anchors = anchors.to_owned_array();
         let shape = anchors.shape();
         Self {
@@ -193,7 +189,7 @@ impl YOLOv5PostProcessor {
 
 #[pymodule]
 pub(crate) fn yolov5(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
-    m.add_class::<YOLOv5PostProcessor>()?;
+    m.add_class::<RustPostProcessor>()?;
 
     Ok(())
 }
