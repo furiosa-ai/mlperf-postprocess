@@ -37,7 +37,7 @@ pub struct RustPostProcessor {
 }
 
 impl fmt::Display for RustPostProcessor {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "RustPostProcessor {{ num_classes: {}, num_outputs: {}, \
@@ -75,7 +75,11 @@ where
 #[pymethods]
 impl RustPostProcessor {
     #[new]
-    fn new(anchors: PyReadonlyArray3<f32>, class_names: Vec<String>, strides: Vec<f32>) -> Self {
+    fn new(
+        anchors: PyReadonlyArray3<'_, f32>,
+        class_names: Vec<String>,
+        strides: Vec<f32>,
+    ) -> Self {
         let anchors = anchors.to_owned_array();
         let shape = anchors.shape();
         Self {
@@ -109,7 +113,7 @@ impl RustPostProcessor {
     fn eval(
         &self,
         py: Python<'_>,
-        inputs: Vec<PyReadonlyArray5<f32>>,
+        inputs: Vec<PyReadonlyArray5<'_, f32>>,
         conf_threshold: f32,
     ) -> PyResult<Py<PyArray<f32, Dim<[usize; 2]>>>> {
         const CONFIDENCE_IDX: usize = 4;
@@ -119,7 +123,7 @@ impl RustPostProcessor {
         for (anchors, &stride, input) in
             izip!(self.anchors.outer_iter(), &self.strides, inputs.iter())
         {
-            let full_array: ArrayView5<f32> = input.as_array();
+            let full_array: ArrayView5<'_, f32> = input.as_array();
             let (&bs, &na, &ny, &nx, &no) =
                 full_array.shape().iter().collect_tuple().expect("Wrong array dimension");
             assert_eq!(no, self.num_outputs, "Invalid number of output size");
