@@ -1,7 +1,7 @@
 use std::fmt;
 
-use itertools::{izip, Itertools};
-use numpy::ndarray::{s, Array2, Array3, ArrayView5, Dim};
+use itertools::izip;
+use numpy::ndarray::{Array2, Array3, Dim};
 use numpy::{PyArray, PyReadonlyArray3, PyReadonlyArray5};
 use pyo3::prelude::*;
 
@@ -116,45 +116,35 @@ impl RustPostProcessor {
         inputs: Vec<PyReadonlyArray5<'_, f32>>,
         conf_threshold: f32,
     ) -> PyResult<Py<PyArray<f32, Dim<[usize; 2]>>>> {
-        const CONFIDENCE_IDX: usize = 4;
         const MAX_BOXES: usize = 10_000;
         const NUM_COLS: usize = 6;
         let mut results = Vec::new();
         let mut num_rows: usize = 0;
 
-        for (anchors, &stride, input) in
-            izip!(self.anchors.outer_iter(), &self.strides, inputs.iter())
+        'outer: for (&stride, anchors_inner_stride, inner_stride) in
+            izip!(&self.strides, self.anchors.outer_iter(), inputs)
         {
-            let full_array: ArrayView5<'_, f32> = input.as_array();
-            let (&bs, &na, &ny, &nx, &no) =
-                full_array.shape().iter().collect_tuple().expect("Wrong array dimension");
-            assert_eq!(no, self.num_outputs, "Invalid number of output size");
-            assert_eq!(na, self.num_anchor, "Wrong anchor number");
-            assert_eq!(nx, ny, "Input must be square");
+            for inner_batch in inner_stride.as_array().outer_iter() {
+                for (anchors, inner_anchor) in
+                    izip!(anchors_inner_stride.outer_iter(), inner_batch.outer_iter())
+                {
+                    let &[ax, ay] = (anchors.to_owned() * stride).as_slice().unwrap() else {
+                        unreachable!()
+                    };
+                    for (y, inner_y) in inner_anchor.outer_iter().enumerate() {
+                        for (x, inner_x) in inner_y.outer_iter().enumerate() {
+                            // Destruct output array
+                            let &[bx, by, bw, bh, object_confidence, ref class_confs @ ..] =
+                                inner_x.as_slice().unwrap()
+                            else {
+                                unreachable!()
+                            };
 
-            'outer: for batch in 0..bs {
-                for anchor_idx in 0..na {
-                    let ax = anchors[[anchor_idx, 0]] * stride;
-                    let ay = anchors[[anchor_idx, 1]] * stride;
-                    for y in 0..ny {
-                        for x in 0..nx {
-                            let object_confidence =
-                                full_array[[batch, anchor_idx, y, x, CONFIDENCE_IDX]];
                             // Low object confidence, skip
                             if object_confidence < conf_threshold {
                                 continue;
-                            }
-
-                            // Array is 1-dimensional number_output lengthed array
-                            let arr = full_array
-                                .slice(s![batch, anchor_idx, y, x, ..])
-                                .to_slice()
-                                .unwrap();
-
-                            // Get class-wise max confidence & index
-                            let &[bx, by, bw, bh, _, ref class_confs@..] = arr else { unreachable!() };
+                            };
                             let (max_class_idx, max_class_confidence) = argmax(class_confs);
-
                             // Low class confidence, skip
                             if object_confidence * max_class_confidence < conf_threshold {
                                 continue;
