@@ -1,7 +1,7 @@
 use std::fmt;
 
 use itertools::{izip, Itertools};
-use numpy::ndarray::{s, Array3, ArrayView5, Dim};
+use numpy::ndarray::{s, Array2, Array3, ArrayView5, Dim};
 use numpy::{PyArray, PyReadonlyArray3, PyReadonlyArray5};
 use pyo3::prelude::*;
 
@@ -118,7 +118,9 @@ impl RustPostProcessor {
     ) -> PyResult<Py<PyArray<f32, Dim<[usize; 2]>>>> {
         const CONFIDENCE_IDX: usize = 4;
         const MAX_BOXES: usize = 10_000;
-        let mut results: Vec<Vec<f32>> = Vec::with_capacity(MAX_BOXES);
+        const NUM_COLS: usize = 6;
+        let mut results = Vec::new();
+        let mut num_rows: usize = 0;
 
         for (anchors, &stride, input) in
             izip!(self.anchors.outer_iter(), &self.strides, inputs.iter())
@@ -144,19 +146,19 @@ impl RustPostProcessor {
                             }
 
                             // Array is 1-dimensional number_output lengthed array
-                            let arr = full_array.slice(s![batch, anchor_idx, y, x, ..]);
+                            let arr = full_array
+                                .slice(s![batch, anchor_idx, y, x, ..])
+                                .to_slice()
+                                .unwrap();
 
                             // Get class-wise max confidence & index
-                            let class_confs = arr.slice(s![5..]).to_slice().unwrap();
+                            let &[bx, by, bw, bh, _, ref class_confs@..] = arr else { unreachable!() };
                             let (max_class_idx, max_class_confidence) = argmax(class_confs);
 
                             // Low class confidence, skip
                             if object_confidence * max_class_confidence < conf_threshold {
                                 continue;
                             }
-
-                            let (&bx, &by, &bw, &bh) =
-                                arr.slice(s![..4]).iter().collect_tuple().unwrap();
 
                             // (feat[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
                             // (feat[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
@@ -171,7 +173,7 @@ impl RustPostProcessor {
                             // xywh -> xyxy
                             let bbox: BoundingBox = centered_box.into();
 
-                            results.push(vec![
+                            results.extend_from_slice(&[
                                 bbox.px1,
                                 bbox.py1,
                                 bbox.px2,
@@ -179,7 +181,8 @@ impl RustPostProcessor {
                                 max_class_confidence,
                                 max_class_idx as f32,
                             ]);
-                            if results.len() >= MAX_BOXES {
+                            num_rows += 1;
+                            if num_rows >= MAX_BOXES {
                                 break 'outer;
                             }
                         }
@@ -187,7 +190,8 @@ impl RustPostProcessor {
                 }
             }
         }
-        Ok(PyArray::from_vec2(py, &results).unwrap().to_owned())
+        Ok(PyArray::from_array(py, &Array2::from_shape_vec((num_rows, NUM_COLS), results).unwrap())
+            .to_owned())
     }
 }
 
