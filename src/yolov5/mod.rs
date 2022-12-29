@@ -5,7 +5,8 @@ use itertools::izip;
 use numpy::ndarray::{Array1, Array3};
 use numpy::{PyReadonlyArray3, PyReadonlyArray5};
 use pyo3::prelude::*;
-use utils::{argmax, centered_box_to_ltrb_bulk, partial_ord_max, partial_ord_min, DetectionBoxes};
+use rulinalg::utils::argmax;
+use utils::{centered_box_to_ltrb_bulk, partial_ord_max, partial_ord_min, DetectionBoxes};
 
 use crate::common::ssd_postprocess::{BoundingBox, DetectionResult, DetectionResults};
 use crate::common::PyDetectionResult;

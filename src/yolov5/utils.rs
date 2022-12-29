@@ -1,28 +1,5 @@
 use numpy::ndarray::Array1;
 
-/// Returns max value's index and value (Argmax, Max)
-///
-/// Copied from https://docs.rs/rulinalg/latest/src/rulinalg/utils.rs.html#245-261
-pub fn argmax<T>(u: &[T]) -> (usize, T)
-where
-    T: Copy + PartialOrd,
-{
-    // Length is always nonzero
-    // assert!(u.len() != 0);
-
-    let mut max_index = 0;
-    let mut max = u[max_index];
-
-    for (i, v) in u.iter().enumerate().skip(1) {
-        if max < *v {
-            max_index = i;
-            max = *v;
-        }
-    }
-
-    (max_index, max)
-}
-
 pub fn centered_box_to_ltrb_bulk(
     pcy: &Array1<f32>,
     pcx: &Array1<f32>,
