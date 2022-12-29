@@ -1,34 +1,14 @@
+pub mod utils;
 use std::fmt;
 
 use itertools::izip;
-use numpy::ndarray::{Array2, Array3};
-use numpy::{PyArray, PyArray2, PyReadonlyArray3, PyReadonlyArray5};
+use numpy::ndarray::{Array1, Array3};
+use numpy::{PyReadonlyArray3, PyReadonlyArray5};
 use pyo3::prelude::*;
+use utils::{argmax, centered_box_to_ltrb_bulk, partial_ord_max, partial_ord_min, DetectionBoxes};
 
-use crate::common::ssd_postprocess::{BoundingBox, CenteredBox};
-
-/// Returns max value's index and value (Argmax, Max)
-///
-/// Copied from https://docs.rs/rulinalg/latest/src/rulinalg/utils.rs.html#245-261
-pub fn argmax<T>(u: &[T]) -> (usize, T)
-where
-    T: Copy + PartialOrd,
-{
-    // Length is always nonzero
-    // assert!(u.len() != 0);
-
-    let mut max_index = 0;
-    let mut max = u[max_index];
-
-    for (i, v) in u.iter().enumerate().skip(1) {
-        if max < *v {
-            max_index = i;
-            max = *v;
-        }
-    }
-
-    (max_index, max)
-}
+use crate::common::ssd_postprocess::{BoundingBox, DetectionResult, DetectionResults};
+use crate::common::PyDetectionResult;
 
 #[derive(Debug, Clone)]
 pub struct RustPostprocessor {
@@ -72,12 +52,19 @@ impl RustPostprocessor {
         &self,
         inputs: Vec<PyReadonlyArray5<'_, f32>>,
         conf_threshold: f32,
-    ) -> Array2<f32> {
+    ) -> DetectionBoxes {
         const MAX_BOXES: usize = 10_000;
-        const NUM_COLS: usize = 6;
-        let mut results = Vec::new();
         let mut num_rows: usize = 0;
 
+        let mut pcy: Vec<f32> = Vec::with_capacity(MAX_BOXES);
+        let mut pcx: Vec<f32> = Vec::with_capacity(MAX_BOXES);
+        let mut ph: Vec<f32> = Vec::with_capacity(MAX_BOXES);
+        let mut pw: Vec<f32> = Vec::with_capacity(MAX_BOXES);
+
+        let mut scores: Vec<f32> = Vec::with_capacity(MAX_BOXES);
+        let mut classes: Vec<usize> = Vec::with_capacity(MAX_BOXES);
+
+        // FIXME: Don't crush batch
         'outer: for (&stride, anchors_inner_stride, inner_stride) in
             izip!(&self.strides, self.anchors.outer_iter(), inputs)
         {
@@ -110,24 +97,14 @@ impl RustPostprocessor {
                             // (feat[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
                             // (feat[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
                             // yolov5 boundingbox format(center_x,center_y,width,height)
-                            let centered_box = CenteredBox::new_centered_box(
-                                (by * 2.0 - 0.5 + y as f32) * stride,
-                                (bx * 2.0 - 0.5 + x as f32) * stride,
-                                4.0 * bh * bh * ay,
-                                4.0 * bw * bw * ax,
-                            );
+                            pcy.push((by * 2.0 - 0.5 + y as f32) * stride);
+                            pcx.push((bx * 2.0 - 0.5 + x as f32) * stride);
+                            ph.push(4.0 * bh * bh * ay);
+                            pw.push(4.0 * bw * bw * ax);
 
-                            // xywh -> xyxy
-                            let bbox: BoundingBox = centered_box.into();
+                            scores.push(object_confidence * max_class_confidence);
+                            classes.push(max_class_idx);
 
-                            results.extend_from_slice(&[
-                                bbox.px1,
-                                bbox.py1,
-                                bbox.px2,
-                                bbox.py2,
-                                max_class_confidence,
-                                max_class_idx as f32,
-                            ]);
                             num_rows += 1;
                             if num_rows >= MAX_BOXES {
                                 break 'outer;
@@ -137,7 +114,79 @@ impl RustPostprocessor {
                 }
             }
         }
-        Array2::from_shape_vec((num_rows, NUM_COLS), results).unwrap()
+
+        let (x1, y1, x2, y2): (Array1<f32>, Array1<f32>, Array1<f32>, Array1<f32>) =
+            centered_box_to_ltrb_bulk(&pcy.into(), &pcx.into(), &pw.into(), &ph.into());
+
+        DetectionBoxes::new(x1, y1, x2, y2, scores.into(), classes.into())
+    }
+
+    /// Non-Maximum Suppression Algorithm
+    /// Faster implementation by Malisiewicz et al.
+    fn nms(boxes: &DetectionBoxes, iou_threshold: f32, epsilon: Option<f32>) -> Vec<usize> {
+        let epsilon = epsilon.unwrap_or(1e-5);
+        let mut indices: Vec<usize> = (0..boxes.len).collect();
+        let mut results: Vec<usize> = Vec::new();
+
+        let areas: Array1<f32> = ((&boxes.x2 - &boxes.x1) * (&boxes.y2 - &boxes.y1)).to_owned();
+
+        indices.sort_unstable_by(|&i, &j| boxes.scores[[i]].partial_cmp(&boxes.scores[j]).unwrap());
+
+        while !indices.is_empty() {
+            let cur_idx = indices.pop().unwrap();
+            results.push(cur_idx);
+
+            let xx1: Array1<f32> =
+                indices.iter().map(|&i| partial_ord_max(boxes.x1[cur_idx], boxes.x1[i])).collect();
+            let yy1: Array1<f32> =
+                indices.iter().map(|&i| partial_ord_max(boxes.y1[cur_idx], boxes.y1[i])).collect();
+            let xx2: Array1<f32> =
+                indices.iter().map(|&i| partial_ord_min(boxes.x2[cur_idx], boxes.x2[i])).collect();
+            let yy2: Array1<f32> =
+                indices.iter().map(|&i| partial_ord_min(boxes.y2[cur_idx], boxes.y2[i])).collect();
+
+            let widths = (xx2 - xx1).mapv(|v| partial_ord_max(0.0, v));
+            let heights = (yy2 - yy1).mapv(|v| partial_ord_max(0.0, v));
+
+            let ious = widths * heights;
+            let cut_areas: Array1<f32> = indices.iter().map(|&i| areas[i]).collect();
+            let overlap = &ious / (areas[cur_idx] + cut_areas - &ious + epsilon);
+            indices = (0..indices.len())
+                .filter(|&i| overlap[i] < iou_threshold)
+                .map(|i| indices[i])
+                .collect();
+        }
+
+        results
+    }
+
+    fn postprocess(
+        &self,
+        inputs: Vec<PyReadonlyArray5<'_, f32>>,
+        conf_threshold: f32,
+        iou_threshold: f32,
+    ) -> DetectionResults {
+        let detection_boxes = self.box_decode(inputs, conf_threshold);
+
+        let indices = Self::nms(&detection_boxes, iou_threshold, None);
+        DetectionResults(
+            indices
+                .iter()
+                .map(|&i| {
+                    DetectionResult::new_detection_result(
+                        i as f32,
+                        BoundingBox::new_bounding_box(
+                            detection_boxes.x1[i],
+                            detection_boxes.y1[i],
+                            detection_boxes.x2[i],
+                            detection_boxes.y2[i],
+                        ),
+                        detection_boxes.scores[i],
+                        detection_boxes.classes[i] as f32,
+                    )
+                })
+                .collect(),
+        )
     }
 }
 
@@ -150,9 +199,7 @@ impl RustPostprocessor {
 ///     num_classes (int)
 ///     strides (numpy.ndarray)
 #[pyclass]
-#[pyo3(
-    text_signature = "(anchors: numpy.ndarray, class_names: Sequence[str], strides: numpy.ndarray)"
-)]
+#[pyo3(text_signature = "(anchors: numpy.ndarray, num_classes: int, strides: numpy.ndarray)")]
 pub struct RustPostProcessor(RustPostprocessor);
 
 #[pymethods]
@@ -185,11 +232,17 @@ impl RustPostProcessor {
     /// #[pyo3(text_signature = "(self, inputs: Sequence[numpy.ndarray], conf_threshold: float)")]
     fn eval(
         &self,
-        py: Python<'_>,
         inputs: Vec<PyReadonlyArray5<'_, f32>>,
         conf_threshold: f32,
-    ) -> PyResult<Py<PyArray2<f32>>> {
-        Ok(PyArray::from_array(py, &self.0.box_decode(inputs, conf_threshold)).to_owned())
+        iou_threshold: f32,
+    ) -> PyResult<Vec<PyDetectionResult>> {
+        Ok(self
+            .0
+            .postprocess(inputs, conf_threshold, iou_threshold)
+            .0
+            .into_iter()
+            .map(PyDetectionResult::new)
+            .collect())
     }
 }
 
