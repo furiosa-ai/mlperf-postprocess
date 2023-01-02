@@ -269,6 +269,7 @@ dependencies = [
  "indexmap",
  "itertools",
  "lazy_static",
+ "ndarray",
  "numpy",
  "openmp-sys",
  "prost",

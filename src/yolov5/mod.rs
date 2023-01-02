@@ -2,51 +2,42 @@ pub mod utils;
 use std::fmt;
 
 use itertools::izip;
-use numpy::ndarray::{Array1, Array3};
+use ndarray::{Array1, Array3};
 use numpy::{PyReadonlyArray3, PyReadonlyArray5};
 use pyo3::prelude::*;
 use rulinalg::utils::argmax;
-use utils::{centered_box_to_ltrb_bulk, partial_ord_max, partial_ord_min, DetectionBoxes};
+use utils::{centered_box_to_ltrb_bulk, DetectionBoxes};
 
 use crate::common::ssd_postprocess::{BoundingBox, DetectionResult, DetectionResults};
 use crate::common::PyDetectionResult;
 
 #[derive(Debug, Clone)]
 pub struct RustPostprocessor {
-    pub num_classes: usize,
-    pub num_outputs: usize,
-    pub num_detection_layers: usize,
-    pub num_anchor: usize,
     pub anchors: Array3<f32>,
     pub strides: Vec<f32>,
 }
 
 impl fmt::Display for RustPostprocessor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let shape = self.anchors.shape();
         write!(
             f,
-            "RustPostProcessor {{ num_classes: {}, num_outputs: {}, \
-            num_detection_layers: {}, num_anchor: {}, strides: {:?} }}",
-            self.num_classes,
-            self.num_outputs,
-            self.num_detection_layers,
-            self.num_anchor,
-            self.strides
+            "RustPostProcessor {{ num_detection_layers: {}, num_anchor: {}, strides: {:?} }}",
+            shape[0], shape[1], self.strides
         )
     }
 }
 
 impl RustPostprocessor {
-    fn new(anchors: Array3<f32>, num_classes: usize, strides: Vec<f32>) -> Self {
-        let shape = anchors.shape();
-        Self {
-            num_classes,
-            num_outputs: num_classes + 5,
-            num_detection_layers: shape[0],
-            num_anchor: shape[1],
-            anchors,
-            strides,
-        }
+    fn new(anchors: Array3<f32>, strides: Vec<f32>) -> Self {
+        pub const NUM_ANCHOR_LAST: usize = 2;
+        assert_eq!(
+            anchors.shape()[2],
+            NUM_ANCHOR_LAST,
+            "anchors' last dimension must be {}",
+            NUM_ANCHOR_LAST
+        );
+        Self { anchors, strides }
     }
 
     fn box_decode(
@@ -65,7 +56,7 @@ impl RustPostprocessor {
         let mut scores: Vec<f32> = Vec::with_capacity(MAX_BOXES);
         let mut classes: Vec<usize> = Vec::with_capacity(MAX_BOXES);
 
-        // FIXME: Don't crush batch
+        // FIXME: Don't crush batch (Current impl ignores and crush batch)
         'outer: for (&stride, anchors_inner_stride, inner_stride) in
             izip!(&self.strides, self.anchors.outer_iter(), inputs)
         {
@@ -116,6 +107,7 @@ impl RustPostprocessor {
             }
         }
 
+        // Convert centered boxes to LTRB boxes at once
         let (x1, y1, x2, y2): (Array1<f32>, Array1<f32>, Array1<f32>, Array1<f32>) =
             centered_box_to_ltrb_bulk(&pcy.into(), &pcx.into(), &pw.into(), &ph.into());
 
@@ -131,23 +123,24 @@ impl RustPostprocessor {
 
         let areas: Array1<f32> = ((&boxes.x2 - &boxes.x1) * (&boxes.y2 - &boxes.y1)).to_owned();
 
-        indices.sort_unstable_by(|&i, &j| boxes.scores[[i]].partial_cmp(&boxes.scores[j]).unwrap());
+        // Performs unstable argmax  `indices = argmax(boxes.scores)`
+        indices.sort_unstable_by(|&i, &j| boxes.scores[i].partial_cmp(&boxes.scores[j]).unwrap());
 
         while !indices.is_empty() {
             let cur_idx = indices.pop().unwrap();
             results.push(cur_idx);
 
             let xx1: Array1<f32> =
-                indices.iter().map(|&i| partial_ord_max(boxes.x1[cur_idx], boxes.x1[i])).collect();
+                indices.iter().map(|&i| f32::max(boxes.x1[cur_idx], boxes.x1[i])).collect();
             let yy1: Array1<f32> =
-                indices.iter().map(|&i| partial_ord_max(boxes.y1[cur_idx], boxes.y1[i])).collect();
+                indices.iter().map(|&i| f32::max(boxes.y1[cur_idx], boxes.y1[i])).collect();
             let xx2: Array1<f32> =
-                indices.iter().map(|&i| partial_ord_min(boxes.x2[cur_idx], boxes.x2[i])).collect();
+                indices.iter().map(|&i| f32::min(boxes.x2[cur_idx], boxes.x2[i])).collect();
             let yy2: Array1<f32> =
-                indices.iter().map(|&i| partial_ord_min(boxes.y2[cur_idx], boxes.y2[i])).collect();
+                indices.iter().map(|&i| f32::min(boxes.y2[cur_idx], boxes.y2[i])).collect();
 
-            let widths = (xx2 - xx1).mapv(|v| partial_ord_max(0.0, v));
-            let heights = (yy2 - yy1).mapv(|v| partial_ord_max(0.0, v));
+            let widths = (xx2 - xx1).mapv(|v| f32::max(0.0, v));
+            let heights = (yy2 - yy1).mapv(|v| f32::max(0.0, v));
 
             let ious = widths * heights;
             let cut_areas: Array1<f32> = indices.iter().map(|&i| areas[i]).collect();
@@ -206,12 +199,8 @@ pub struct RustPostProcessor(RustPostprocessor);
 #[pymethods]
 impl RustPostProcessor {
     #[new]
-    fn new(
-        anchors: PyReadonlyArray3<'_, f32>,
-        num_classes: usize,
-        strides: Vec<f32>,
-    ) -> PyResult<Self> {
-        Ok(Self(RustPostprocessor::new(anchors.to_owned_array(), num_classes, strides)))
+    fn new(anchors: PyReadonlyArray3<'_, f32>, strides: Vec<f32>) -> PyResult<Self> {
+        Ok(Self(RustPostprocessor::new(anchors.to_owned_array(), strides)))
     }
 
     fn __repr__(&self) -> PyResult<String> {
