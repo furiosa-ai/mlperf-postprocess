@@ -6,7 +6,7 @@ pub mod ssd_postprocess;
 
 use numpy::PyArrayDyn;
 use pyo3::{self, exceptions::PyValueError, pyclass, pymethods, types::PyList, PyErr, PyResult};
-use ssd_postprocess::DetectionResult;
+use ssd_postprocess::{DetectionResult, DetectionResults};
 
 #[pyclass]
 #[derive(Clone, Debug)]
@@ -80,6 +80,12 @@ impl PyDetectionResult {
 }
 
 pub type PyDetectionResults = Vec<PyDetectionResult>;
+
+impl From<DetectionResults> for PyDetectionResults {
+    fn from(value: DetectionResults) -> Self {
+        value.0.into_iter().map(PyDetectionResult::new).collect()
+    }
+}
 
 pub(crate) fn convert_to_slices(inputs: &PyList) -> PyResult<Vec<&[u8]>> {
     let input_len = inputs.len();

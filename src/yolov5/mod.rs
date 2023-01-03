@@ -9,7 +9,7 @@ use rulinalg::utils::argmax;
 use utils::{centered_box_to_ltrb_bulk, DetectionBoxes};
 
 use crate::common::ssd_postprocess::{BoundingBox, DetectionResult, DetectionResults};
-use crate::common::{PyDetectionResult, PyDetectionResults};
+use crate::common::PyDetectionResults;
 
 #[derive(Debug, Clone)]
 pub struct RustPostprocessor {
@@ -161,6 +161,8 @@ impl RustPostprocessor {
         results
     }
 
+    /// YOLOv5 postprocess function
+    /// The vector in function input/output is for batched input/output
     fn postprocess(
         &self,
         inputs: Vec<PyReadonlyArray5<'_, f32>>,
@@ -168,7 +170,7 @@ impl RustPostprocessor {
         iou_threshold: f32,
     ) -> Vec<DetectionResults> {
         let detection_boxes = self.box_decode(inputs, conf_threshold);
-        // Inner vector for result indexes in one image, outer vector for batch
+        // Inner vector for the result indexes in one image, outer vector for batch
         let indices: Vec<Vec<usize>> =
             detection_boxes.iter().map(|dbox| Self::nms(dbox, iou_threshold, None)).collect();
 
@@ -225,10 +227,10 @@ impl RustPostProcessor {
     ///
     /// Args:
     ///     inputs (Sequence[numpy.ndarray]): Input tensors
-    ///     conf_threshold (float): confidence threshold
+    ///     conf_threshold (float): Confidence threshold
     ///
     /// Returns:
-    ///     numpy.ndarray: Output tensors
+    ///     List[numpy.ndarray]: Batched detection results
     /// #[pyo3(text_signature = "(self, inputs: Sequence[numpy.ndarray], conf_threshold: float)")]
     fn eval(
         &self,
@@ -240,7 +242,7 @@ impl RustPostProcessor {
             .0
             .postprocess(inputs, conf_threshold, iou_threshold)
             .into_iter()
-            .map(|i| i.0.into_iter().map(PyDetectionResult::new).collect())
+            .map(PyDetectionResults::from)
             .collect())
     }
 }
