@@ -170,10 +170,10 @@ impl RustPostprocessor {
                     DetectionResult::new_detection_result(
                         i as f32,
                         BoundingBox::new_bounding_box(
-                            detection_boxes.x1[i],
                             detection_boxes.y1[i],
-                            detection_boxes.x2[i],
+                            detection_boxes.x1[i],
                             detection_boxes.y2[i],
+                            detection_boxes.x2[i],
                         ),
                         detection_boxes.scores[i],
                         detection_boxes.classes[i] as f32,
