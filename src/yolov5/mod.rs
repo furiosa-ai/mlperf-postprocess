@@ -44,23 +44,24 @@ impl RustPostprocessor {
         &self,
         inputs: Vec<PyReadonlyArray5<'_, f32>>,
         conf_threshold: f32,
-    ) -> DetectionBoxes {
+    ) -> Vec<DetectionBoxes> {
         const MAX_BOXES: usize = 10_000;
         let mut num_rows: usize = 0;
 
-        let mut pcy: Vec<f32> = Vec::with_capacity(MAX_BOXES);
-        let mut pcx: Vec<f32> = Vec::with_capacity(MAX_BOXES);
-        let mut ph: Vec<f32> = Vec::with_capacity(MAX_BOXES);
-        let mut pw: Vec<f32> = Vec::with_capacity(MAX_BOXES);
-
-        let mut scores: Vec<f32> = Vec::with_capacity(MAX_BOXES);
-        let mut classes: Vec<usize> = Vec::with_capacity(MAX_BOXES);
+        let mut detections_boxes: Vec<DetectionBoxes> = Vec::new();
 
         // FIXME: Don't crush batch (Current impl ignores and crush batch)
         'outer: for (&stride, anchors_inner_stride, inner_stride) in
             izip!(&self.strides, self.anchors.outer_iter(), inputs)
         {
             for inner_batch in inner_stride.as_array().outer_iter() {
+                let mut pcy: Vec<f32> = Vec::with_capacity(MAX_BOXES);
+                let mut pcx: Vec<f32> = Vec::with_capacity(MAX_BOXES);
+                let mut ph: Vec<f32> = Vec::with_capacity(MAX_BOXES);
+                let mut pw: Vec<f32> = Vec::with_capacity(MAX_BOXES);
+
+                let mut scores: Vec<f32> = Vec::with_capacity(MAX_BOXES);
+                let mut classes: Vec<usize> = Vec::with_capacity(MAX_BOXES);
                 for (anchors, inner_anchor) in
                     izip!(anchors_inner_stride.outer_iter(), inner_batch.outer_iter())
                 {
@@ -104,14 +105,20 @@ impl RustPostprocessor {
                         }
                     }
                 }
+                // Convert centered boxes to LTRB boxes at once
+                let (x1, y1, x2, y2): (Array1<f32>, Array1<f32>, Array1<f32>, Array1<f32>) =
+                    centered_box_to_ltrb_bulk(&pcy.into(), &pcx.into(), &pw.into(), &ph.into());
+                detections_boxes.push(DetectionBoxes::new(
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    scores.into(),
+                    classes.into(),
+                ));
             }
         }
-
-        // Convert centered boxes to LTRB boxes at once
-        let (x1, y1, x2, y2): (Array1<f32>, Array1<f32>, Array1<f32>, Array1<f32>) =
-            centered_box_to_ltrb_bulk(&pcy.into(), &pcx.into(), &pw.into(), &ph.into());
-
-        DetectionBoxes::new(x1, y1, x2, y2, scores.into(), classes.into())
+        detections_boxes
     }
 
     /// Non-Maximum Suppression Algorithm
@@ -159,28 +166,30 @@ impl RustPostprocessor {
         inputs: Vec<PyReadonlyArray5<'_, f32>>,
         conf_threshold: f32,
         iou_threshold: f32,
-    ) -> DetectionResults {
+    ) -> Vec<DetectionResults> {
         let detection_boxes = self.box_decode(inputs, conf_threshold);
 
-        let indices = Self::nms(&detection_boxes, iou_threshold, None);
-        DetectionResults(
-            indices
-                .iter()
-                .map(|&i| {
-                    DetectionResult::new_detection_result(
-                        i as f32,
-                        BoundingBox::new_bounding_box(
-                            detection_boxes.y1[i],
-                            detection_boxes.x1[i],
-                            detection_boxes.y2[i],
-                            detection_boxes.x2[i],
-                        ),
-                        detection_boxes.scores[i],
-                        detection_boxes.classes[i] as f32,
-                    )
-                })
-                .collect(),
-        )
+        let indices: Vec<Vec<usize>> =
+            detection_boxes.iter().map(|dbox| Self::nms(dbox, iou_threshold, None)).collect();
+        izip!(detection_boxes, indices)
+            .map(|(dbox, indexes)| {
+                DetectionResults(
+                    indexes
+                        .into_iter()
+                        .map(|i| {
+                            DetectionResult::new_detection_result(
+                                i as f32,
+                                BoundingBox::new_bounding_box(
+                                    dbox.y1[i], dbox.x1[i], dbox.y2[i], dbox.x2[i],
+                                ),
+                                dbox.scores[i],
+                                dbox.classes[i] as f32,
+                            )
+                        })
+                        .collect(),
+                )
+            })
+            .collect()
     }
 }
 
@@ -225,13 +234,12 @@ impl RustPostProcessor {
         inputs: Vec<PyReadonlyArray5<'_, f32>>,
         conf_threshold: f32,
         iou_threshold: f32,
-    ) -> PyResult<Vec<PyDetectionResult>> {
+    ) -> PyResult<Vec<Vec<PyDetectionResult>>> {
         Ok(self
             .0
             .postprocess(inputs, conf_threshold, iou_threshold)
-            .0
             .into_iter()
-            .map(PyDetectionResult::new)
+            .map(|i| i.0.into_iter().map(PyDetectionResult::new).collect())
             .collect())
     }
 }
