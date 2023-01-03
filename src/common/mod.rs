@@ -79,6 +79,8 @@ impl PyDetectionResult {
     }
 }
 
+pub type PyDetectionResults = Vec<PyDetectionResult>;
+
 pub(crate) fn convert_to_slices(inputs: &PyList) -> PyResult<Vec<&[u8]>> {
     let input_len = inputs.len();
 

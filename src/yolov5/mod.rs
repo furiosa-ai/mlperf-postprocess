@@ -9,7 +9,7 @@ use rulinalg::utils::argmax;
 use utils::{centered_box_to_ltrb_bulk, DetectionBoxes};
 
 use crate::common::ssd_postprocess::{BoundingBox, DetectionResult, DetectionResults};
-use crate::common::PyDetectionResult;
+use crate::common::{PyDetectionResult, PyDetectionResults};
 
 #[derive(Debug, Clone)]
 pub struct RustPostprocessor {
@@ -50,11 +50,11 @@ impl RustPostprocessor {
 
         let mut detections_boxes: Vec<DetectionBoxes> = Vec::new();
 
-        // FIXME: Don't crush batch (Current impl ignores and crush batch)
         'outer: for (&stride, anchors_inner_stride, inner_stride) in
             izip!(&self.strides, self.anchors.outer_iter(), inputs)
         {
             for inner_batch in inner_stride.as_array().outer_iter() {
+                // Perform box_decode for one batch
                 let mut pcy: Vec<f32> = Vec::with_capacity(MAX_BOXES);
                 let mut pcx: Vec<f32> = Vec::with_capacity(MAX_BOXES);
                 let mut ph: Vec<f32> = Vec::with_capacity(MAX_BOXES);
@@ -130,7 +130,7 @@ impl RustPostprocessor {
 
         let areas: Array1<f32> = ((&boxes.x2 - &boxes.x1) * (&boxes.y2 - &boxes.y1)).to_owned();
 
-        // Performs unstable argmax  `indices = argmax(boxes.scores)`
+        // Performs unstable argmax `indices = argmax(boxes.scores)`
         indices.sort_unstable_by(|&i, &j| boxes.scores[i].partial_cmp(&boxes.scores[j]).unwrap());
 
         while !indices.is_empty() {
@@ -168,9 +168,10 @@ impl RustPostprocessor {
         iou_threshold: f32,
     ) -> Vec<DetectionResults> {
         let detection_boxes = self.box_decode(inputs, conf_threshold);
-
+        // Inner vector for result indexes in one image, outer vector for batch
         let indices: Vec<Vec<usize>> =
             detection_boxes.iter().map(|dbox| Self::nms(dbox, iou_threshold, None)).collect();
+
         izip!(detection_boxes, indices)
             .map(|(dbox, indexes)| {
                 DetectionResults(
@@ -234,7 +235,7 @@ impl RustPostProcessor {
         inputs: Vec<PyReadonlyArray5<'_, f32>>,
         conf_threshold: f32,
         iou_threshold: f32,
-    ) -> PyResult<Vec<Vec<PyDetectionResult>>> {
+    ) -> PyResult<Vec<PyDetectionResults>> {
         Ok(self
             .0
             .postprocess(inputs, conf_threshold, iou_threshold)
