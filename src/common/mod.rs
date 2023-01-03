@@ -6,7 +6,7 @@ pub mod ssd_postprocess;
 
 use numpy::PyArrayDyn;
 use pyo3::{self, exceptions::PyValueError, pyclass, pymethods, types::PyList, PyErr, PyResult};
-use ssd_postprocess::DetectionResult;
+use ssd_postprocess::{DetectionResult, DetectionResults};
 
 #[pyclass]
 #[derive(Clone, Debug)]
@@ -76,6 +76,14 @@ impl PyDetectionResult {
             score: r.score,
             class_id: r.class as i32,
         }
+    }
+}
+
+pub type PyDetectionResults = Vec<PyDetectionResult>;
+
+impl From<DetectionResults> for PyDetectionResults {
+    fn from(value: DetectionResults) -> Self {
+        value.0.into_iter().map(PyDetectionResult::new).collect()
     }
 }
 

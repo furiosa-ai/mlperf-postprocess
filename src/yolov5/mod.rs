@@ -9,7 +9,7 @@ use rulinalg::utils::argmax;
 use utils::{centered_box_to_ltrb_bulk, DetectionBoxes};
 
 use crate::common::ssd_postprocess::{BoundingBox, DetectionResult, DetectionResults};
-use crate::common::PyDetectionResult;
+use crate::common::PyDetectionResults;
 
 #[derive(Debug, Clone)]
 pub struct RustPostprocessor {
@@ -44,23 +44,24 @@ impl RustPostprocessor {
         &self,
         inputs: Vec<PyReadonlyArray5<'_, f32>>,
         conf_threshold: f32,
-    ) -> DetectionBoxes {
+    ) -> Vec<DetectionBoxes> {
         const MAX_BOXES: usize = 10_000;
         let mut num_rows: usize = 0;
 
-        let mut pcy: Vec<f32> = Vec::with_capacity(MAX_BOXES);
-        let mut pcx: Vec<f32> = Vec::with_capacity(MAX_BOXES);
-        let mut ph: Vec<f32> = Vec::with_capacity(MAX_BOXES);
-        let mut pw: Vec<f32> = Vec::with_capacity(MAX_BOXES);
+        let mut detections_boxes: Vec<DetectionBoxes> = Vec::new();
 
-        let mut scores: Vec<f32> = Vec::with_capacity(MAX_BOXES);
-        let mut classes: Vec<usize> = Vec::with_capacity(MAX_BOXES);
-
-        // FIXME: Don't crush batch (Current impl ignores and crush batch)
         'outer: for (&stride, anchors_inner_stride, inner_stride) in
             izip!(&self.strides, self.anchors.outer_iter(), inputs)
         {
             for inner_batch in inner_stride.as_array().outer_iter() {
+                // Perform box_decode for one batch
+                let mut pcy: Vec<f32> = Vec::with_capacity(MAX_BOXES);
+                let mut pcx: Vec<f32> = Vec::with_capacity(MAX_BOXES);
+                let mut ph: Vec<f32> = Vec::with_capacity(MAX_BOXES);
+                let mut pw: Vec<f32> = Vec::with_capacity(MAX_BOXES);
+
+                let mut scores: Vec<f32> = Vec::with_capacity(MAX_BOXES);
+                let mut classes: Vec<usize> = Vec::with_capacity(MAX_BOXES);
                 for (anchors, inner_anchor) in
                     izip!(anchors_inner_stride.outer_iter(), inner_batch.outer_iter())
                 {
@@ -104,14 +105,20 @@ impl RustPostprocessor {
                         }
                     }
                 }
+                // Convert centered boxes to LTRB boxes at once
+                let (x1, y1, x2, y2): (Array1<f32>, Array1<f32>, Array1<f32>, Array1<f32>) =
+                    centered_box_to_ltrb_bulk(&pcy.into(), &pcx.into(), &pw.into(), &ph.into());
+                detections_boxes.push(DetectionBoxes::new(
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    scores.into(),
+                    classes.into(),
+                ));
             }
         }
-
-        // Convert centered boxes to LTRB boxes at once
-        let (x1, y1, x2, y2): (Array1<f32>, Array1<f32>, Array1<f32>, Array1<f32>) =
-            centered_box_to_ltrb_bulk(&pcy.into(), &pcx.into(), &pw.into(), &ph.into());
-
-        DetectionBoxes::new(x1, y1, x2, y2, scores.into(), classes.into())
+        detections_boxes
     }
 
     /// Non-Maximum Suppression Algorithm
@@ -123,7 +130,7 @@ impl RustPostprocessor {
 
         let areas: Array1<f32> = ((&boxes.x2 - &boxes.x1) * (&boxes.y2 - &boxes.y1)).to_owned();
 
-        // Performs unstable argmax  `indices = argmax(boxes.scores)`
+        // Performs unstable argmax `indices = argmax(boxes.scores)`
         indices.sort_unstable_by(|&i, &j| boxes.scores[i].partial_cmp(&boxes.scores[j]).unwrap());
 
         while !indices.is_empty() {
@@ -154,33 +161,38 @@ impl RustPostprocessor {
         results
     }
 
+    /// YOLOv5 postprocess function
+    /// The vector in function input/output is for batched input/output
     fn postprocess(
         &self,
         inputs: Vec<PyReadonlyArray5<'_, f32>>,
         conf_threshold: f32,
         iou_threshold: f32,
-    ) -> DetectionResults {
+    ) -> Vec<DetectionResults> {
         let detection_boxes = self.box_decode(inputs, conf_threshold);
+        // Inner vector for the result indexes in one image, outer vector for batch
+        let indices: Vec<Vec<usize>> =
+            detection_boxes.iter().map(|dbox| Self::nms(dbox, iou_threshold, None)).collect();
 
-        let indices = Self::nms(&detection_boxes, iou_threshold, None);
-        DetectionResults(
-            indices
-                .iter()
-                .map(|&i| {
-                    DetectionResult::new_detection_result(
-                        i as f32,
-                        BoundingBox::new_bounding_box(
-                            detection_boxes.x1[i],
-                            detection_boxes.y1[i],
-                            detection_boxes.x2[i],
-                            detection_boxes.y2[i],
-                        ),
-                        detection_boxes.scores[i],
-                        detection_boxes.classes[i] as f32,
-                    )
-                })
-                .collect(),
-        )
+        izip!(detection_boxes, indices)
+            .map(|(dbox, indexes)| {
+                DetectionResults(
+                    indexes
+                        .into_iter()
+                        .map(|i| {
+                            DetectionResult::new_detection_result(
+                                i as f32,
+                                BoundingBox::new_bounding_box(
+                                    dbox.y1[i], dbox.x1[i], dbox.y2[i], dbox.x2[i],
+                                ),
+                                dbox.scores[i],
+                                dbox.classes[i] as f32,
+                            )
+                        })
+                        .collect(),
+                )
+            })
+            .collect()
     }
 }
 
@@ -215,23 +227,22 @@ impl RustPostProcessor {
     ///
     /// Args:
     ///     inputs (Sequence[numpy.ndarray]): Input tensors
-    ///     conf_threshold (float): confidence threshold
+    ///     conf_threshold (float): Confidence threshold
     ///
     /// Returns:
-    ///     numpy.ndarray: Output tensors
+    ///     List[numpy.ndarray]: Batched detection results
     /// #[pyo3(text_signature = "(self, inputs: Sequence[numpy.ndarray], conf_threshold: float)")]
     fn eval(
         &self,
         inputs: Vec<PyReadonlyArray5<'_, f32>>,
         conf_threshold: f32,
         iou_threshold: f32,
-    ) -> PyResult<Vec<PyDetectionResult>> {
+    ) -> PyResult<Vec<PyDetectionResults>> {
         Ok(self
             .0
             .postprocess(inputs, conf_threshold, iou_threshold)
-            .0
             .into_iter()
-            .map(PyDetectionResult::new)
+            .map(PyDetectionResults::from)
             .collect())
     }
 }
