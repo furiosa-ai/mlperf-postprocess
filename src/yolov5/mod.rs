@@ -48,12 +48,13 @@ impl RustPostprocessor {
         const MAX_BOXES: usize = 10_000;
         let mut num_rows: usize = 0;
 
-        let mut detections_boxes: Vec<DetectionBoxes> = Vec::new();
+        let batch_size = inputs[0].shape()[0];
+        let mut detection_boxes: Vec<DetectionBoxes> = vec![DetectionBoxes::empty(); batch_size];
 
         'outer: for (&stride, anchors_inner_stride, inner_stride) in
             izip!(&self.strides, self.anchors.outer_iter(), inputs)
         {
-            for inner_batch in inner_stride.as_array().outer_iter() {
+            for (batch_index, inner_batch) in inner_stride.as_array().outer_iter().enumerate() {
                 // Perform box_decode for one batch
                 let mut pcy: Vec<f32> = Vec::with_capacity(MAX_BOXES);
                 let mut pcx: Vec<f32> = Vec::with_capacity(MAX_BOXES);
@@ -78,12 +79,12 @@ impl RustPostprocessor {
                             };
 
                             // Low object confidence, skip
-                            if object_confidence < conf_threshold {
+                            if object_confidence <= conf_threshold {
                                 continue;
                             };
                             let (max_class_idx, max_class_confidence) = argmax(class_confs);
                             // Low class confidence, skip
-                            if object_confidence * max_class_confidence < conf_threshold {
+                            if object_confidence * max_class_confidence <= conf_threshold {
                                 continue;
                             }
 
@@ -108,17 +109,11 @@ impl RustPostprocessor {
                 // Convert centered boxes to LTRB boxes at once
                 let (x1, y1, x2, y2): (Array1<f32>, Array1<f32>, Array1<f32>, Array1<f32>) =
                     centered_box_to_ltrb_bulk(&pcy.into(), &pcx.into(), &pw.into(), &ph.into());
-                detections_boxes.push(DetectionBoxes::new(
-                    x1,
-                    y1,
-                    x2,
-                    y2,
-                    scores.into(),
-                    classes.into(),
-                ));
+                detection_boxes[batch_index].append(x1, y1, x2, y2, scores.into(), classes.into());
             }
         }
-        detections_boxes
+
+        detection_boxes
     }
 
     /// Non-Maximum Suppression Algorithm
@@ -153,7 +148,7 @@ impl RustPostprocessor {
             let cut_areas: Array1<f32> = indices.iter().map(|&i| areas[i]).collect();
             let overlap = &ious / (areas[cur_idx] + cut_areas - &ious + epsilon);
             indices = (0..indices.len())
-                .filter(|&i| overlap[i] < iou_threshold)
+                .filter(|&i| overlap[i] <= iou_threshold)
                 .map(|i| indices[i])
                 .collect();
         }
