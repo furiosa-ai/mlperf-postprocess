@@ -195,11 +195,9 @@ impl RustPostprocessor {
 /// It takes anchors, class_names, strides as input
 ///
 /// Args:
-///     anchors (numpy.ndarray)
-///     num_classes (int)
-///     strides (numpy.ndarray)
+///     anchors (numpy.ndarray): Anchors (3D Array)
+///     strides (numpy.ndarray): Strides (1D Array)
 #[pyclass]
-#[pyo3(text_signature = "(anchors: numpy.ndarray, num_classes: int, strides: numpy.ndarray)")]
 pub struct RustPostProcessor(RustPostprocessor);
 
 #[pymethods]
@@ -222,10 +220,10 @@ impl RustPostProcessor {
     /// Args:
     ///     inputs (Sequence[numpy.ndarray]): Input tensors
     ///     conf_threshold (float): Confidence threshold
+    ///     iou_threshold (float): IoU threshold
     ///
     /// Returns:
     ///     List[numpy.ndarray]: Batched detection results
-    /// #[pyo3(text_signature = "(self, inputs: Sequence[numpy.ndarray], conf_threshold: float)")]
     fn eval(
         &self,
         inputs: Vec<PyReadonlyArray5<'_, f32>>,
