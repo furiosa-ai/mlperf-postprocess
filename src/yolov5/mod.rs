@@ -34,8 +34,7 @@ impl RustPostprocessor {
         assert_eq!(
             anchors.shape()[2],
             NUM_ANCHOR_LAST,
-            "anchors' last dimension must be {}",
-            NUM_ANCHOR_LAST
+            "anchors' last dimension must be {NUM_ANCHOR_LAST}"
         );
         Self { anchors, strides }
     }

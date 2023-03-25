@@ -484,7 +484,7 @@ impl RustPostProcessor {
     #[new]
     fn new(dfg: &[u8]) -> PyResult<Self> {
         let graph = create_graph_from_binary_with_header(dfg)
-            .map_err(|e| PyErr::new::<PyValueError, _>(format!("invalid DFG format: {}", e)))?;
+            .map_err(|e| PyErr::new::<PyValueError, _>(format!("invalid DFG format: {e}")))?;
 
         Ok(Self(RustPostprocessor::new(&graph)))
     }
