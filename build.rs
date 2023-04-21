@@ -26,7 +26,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .build("src/lib.rs");
     }
 
-    let proto_files = &["npu_ir/dfg.proto", "npu_ir/common.proto"];
+    let proto_files = &[
+        "npu_ir/dfg.proto",
+        "npu_ir/element_type.proto",
+        "npu_ir/shape.proto",
+        "npu_ir/tensor.proto",
+    ];
     let mut prost_config = prost_build::Config::new();
     let proto_includes = if let Ok(path) = std::env::var("NPU_TOOLS_PATH") {
         vec![PathBuf::from(path).join("crates/npu-ir/protos_generated/")]
