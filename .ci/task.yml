@@ -17,7 +17,7 @@ spec:
   params:
     - name: image
       description: The container image to use black in
-      default: asia-northeast3-docker.pkg.dev/next-gen-infra/furiosa-ai/mlperf-postprocess:221102
+      default: asia-northeast3-docker.pkg.dev/next-gen-infra/furiosa-ai/mlperf-postprocess:230421
   steps:
     - name: format
       env:
@@ -57,7 +57,7 @@ spec:
   params:
     - name: image
       description: The container image to use black in
-      default: asia-northeast3-docker.pkg.dev/next-gen-infra/furiosa-ai/mlperf-postprocess:221102
+      default: asia-northeast3-docker.pkg.dev/next-gen-infra/furiosa-ai/mlperf-postprocess:230421
   steps:
     - name: unittest
       env:
@@ -96,7 +96,7 @@ spec:
   params:
     - name: image
       description: The container image to use black in
-      default: asia-northeast3-docker.pkg.dev/next-gen-infra/furiosa-ai/mlperf-postprocess:221102
+      default: asia-northeast3-docker.pkg.dev/next-gen-infra/furiosa-ai/mlperf-postprocess:230421
   steps:
     - name: build-wheel
       env:
