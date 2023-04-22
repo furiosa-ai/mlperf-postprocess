@@ -1,7 +1,7 @@
 SHELL := /bin/bash -o pipefail
 
-TOOLCHAIN_VERSION=0.8.0-2
-ONNXRUNTIME_VERSION=1.12.1-2
+TOOLCHAIN_VERSION=0.9.0-2
+ONNXRUNTIME_VERSION=1.13.1-2
 
 .PHONY: install-deps lint test
 
