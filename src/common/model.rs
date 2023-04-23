@@ -10,12 +10,17 @@ pub struct QuantizationParameter {
 pub enum ElementType {
     Float64,
     Int8 { quantization_parameter: QuantizationParameter },
+    Uint8 { quantization_parameter: QuantizationParameter },
 }
 
 impl ElementType {
     pub fn get_scale_and_zero_point(&self) -> (f64, i32) {
-        let ElementType::Int8 { quantization_parameter} = self else {
-            todo!("Currently only supports Int8");
+        let quantization_parameter = match self {
+            ElementType::Int8 { quantization_parameter } => quantization_parameter,
+            ElementType::Uint8 { quantization_parameter } => quantization_parameter,
+            _ => {
+                todo!("Currently only supports Int8/Uint8")
+            }
         };
         (quantization_parameter.scale, quantization_parameter.zero_point)
     }

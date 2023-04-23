@@ -25,7 +25,18 @@ impl<'a> From<&'a proto::element_type::ElementType> for ElementType {
                 let zero_point = i8::min_value() as i32 - (min / scale).round() as i32;
                 Self::Int8 { quantization_parameter: QuantizationParameter { scale, zero_point } }
             }
-            _ => unimplemented!("Only Int8 output type supported"),
+            proto::element_type::element_type::Inner::Uint8(inner) => {
+                let quantization_info = inner.quantization_info.as_ref().unwrap();
+                assert_eq!(quantization_info.quantization_parameters.len(), 1);
+
+                let proto::element_type::QuantizationParameter { min, max } =
+                    quantization_info.quantization_parameters[0];
+
+                let scale = (max - min) / (u8::max_value() as f64 - u8::min_value() as f64);
+                let zero_point = u8::min_value() as i32 - (min / scale).round() as i32;
+                Self::Uint8 { quantization_parameter: QuantizationParameter { scale, zero_point } }
+            }
+            _ => unimplemented!("Only Int8/Uint8 output type supported"),
         }
     }
 }
