@@ -1,10 +1,6 @@
 use std::ops::{Deref, DerefMut};
 use std::{mem, slice};
 
-pub trait Postprocess {
-    fn postprocess(&self, index: f32, data: &[&[u8]]) -> DetectionResults;
-}
-
 #[repr(C)]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct BoundingBox {

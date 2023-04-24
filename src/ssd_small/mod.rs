@@ -8,9 +8,7 @@ use ndarray::{Array3, ArrayView3, ArrayViewD};
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyList};
 use rayon::prelude::*;
 
-use crate::common::ssd_postprocess::{
-    BoundingBox, CenteredBox, DetectionResult, DetectionResults, Postprocess,
-};
+use crate::common::ssd_postprocess::{BoundingBox, CenteredBox, DetectionResult, DetectionResults};
 use crate::common::{downcast_to_f32, uninitialized_vec, PyDetectionResult};
 
 const FEATURE_MAP_SHAPES: [usize; 6] = [19, 10, 5, 3, 2, 1];
@@ -72,12 +70,6 @@ impl RustPostprocessor {
             for anchor_index in 0..NUM_ANCHORS[index] {
                 for f_y in 0..FEATURE_MAP_SHAPES[index] {
                     for f_x in 0..FEATURE_MAP_SHAPES[index] {
-                        // eprintln!(
-                        //     "index: {}, shape: {:?}, coord: {:?}",
-                        //     index,
-                        //     scores[index].shape(),
-                        //     (anchor_index * NUM_CLASSES + class_index, f_y, f_x)
-                        // );
                         let q = scores[index]
                             .get((anchor_index * NUM_CLASSES + class_index, f_y, f_x))
                             .unwrap();
