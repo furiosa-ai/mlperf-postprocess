@@ -4,19 +4,14 @@ extern crate openmp_sys;
 use std::mem;
 
 use itertools::Itertools;
+use ndarray::{Array3, ArrayView3, ArrayViewD};
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyList};
 use rayon::prelude::*;
 
-use crate::common::graph::{create_graph_from_binary_with_header, GraphInfo};
-use crate::common::model::ModelOutputInfo;
 use crate::common::ssd_postprocess::{
     BoundingBox, CenteredBox, DetectionResult, DetectionResults, Postprocess,
 };
-use crate::common::{
-    convert_to_slices,
-    shape::{Shape, TensorIndexer},
-    uninitialized_vec, PyDetectionResult,
-};
+use crate::common::{downcast_to_f32, uninitialized_vec, PyDetectionResult};
 
 const FEATURE_MAP_SHAPES: [usize; 6] = [19, 10, 5, 3, 2, 1];
 const ANCHOR_STRIDES: [usize; 6] = [19 * 19, 10 * 10, 5 * 5, 3 * 3, 2 * 2, 1];
@@ -35,32 +30,38 @@ const NMS_THRESHOLD: f32 = 0.6f32;
 
 #[derive(Debug, Clone)]
 pub struct RustPostprocessor {
-    output_deq_tables: [[f32; 256]; NUM_OUTPUTS],
-    output_exp_scale_deq_tables: [[f32; 256]; NUM_OUTPUTS],
     output_base_index: [usize; 7],
-    score_thresholds: [Option<i8>; NUM_OUTPUTS / 2],
-    score_lowered_shapes: [TensorIndexer; NUM_OUTPUTS / 2],
-    box_lowered_shapes: [TensorIndexer; NUM_OUTPUTS / 2],
     box_priors: Vec<CenteredBox>,
-    parallel_processing: bool,
 }
 
 impl RustPostprocessor {
-    pub fn new(main: &GraphInfo) -> Self {
-        let model: ModelOutputInfo = main.into();
-        Self::from(&model)
-    }
+    pub fn new() -> Self {
+        let mut output_base_index = [0usize; 7];
+        for i in 0..6 {
+            output_base_index[i + 1] = output_base_index[i]
+                + NUM_ANCHORS[i] * FEATURE_MAP_SHAPES[i] * FEATURE_MAP_SHAPES[i];
+        }
 
-    #[must_use]
-    pub fn with_parallel_processing(mut self, x: bool) -> Self {
-        self.parallel_processing = x;
-        self
+        let box_priors = include_bytes!("../../models/ssd_small_precomputed_priors")
+            .chunks(SIZE_OF_F32 * 4)
+            .map(|bytes| {
+                let (py1, px1, py2, px2) = bytes
+                    .chunks(SIZE_OF_F32)
+                    .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+                    .tuples()
+                    .next()
+                    .unwrap();
+                BoundingBox { py1, px1, py2, px2 }.into()
+            })
+            .collect();
+
+        Self { output_base_index, box_priors }
     }
 
     fn filter_result(
         &self,
         query_index: f32,
-        scores: &[&[u8]],
+        scores: &[Array3<f32>],
         boxes: &[BoundingBox],
         class_index: usize,
         results: &mut Vec<DetectionResult>,
@@ -68,26 +69,26 @@ impl RustPostprocessor {
     ) {
         let mut filtered = Vec::with_capacity(CHANNEL_COUNT);
         for index in 0..6 {
-            if let Some(score_threshold) = self.score_thresholds[index] {
-                let shape = &self.score_lowered_shapes[index];
-                let original_shape =
-                    Shape::new(FEATURE_MAP_SHAPES[index], FEATURE_MAP_SHAPES[index]);
-                let deq_table = self.output_deq_tables[index];
-                for anchor_index in 0..NUM_ANCHORS[index] {
-                    for f_y in 0..FEATURE_MAP_SHAPES[index] {
-                        for f_x in 0..FEATURE_MAP_SHAPES[index] {
-                            let score_index =
-                                shape.index(anchor_index * NUM_CLASSES + class_index, f_y, f_x);
-                            let q = scores[index][score_index] as i8;
-                            if q >= score_threshold {
-                                let score = deq_table[q as u8 as usize];
-                                debug_assert!(score > SCORE_THRESHOLD);
-                                filtered.push((
-                                    score,
-                                    original_shape.index(anchor_index, f_y, f_x)
-                                        + self.output_base_index[index],
-                                ));
-                            }
+            for anchor_index in 0..NUM_ANCHORS[index] {
+                for f_y in 0..FEATURE_MAP_SHAPES[index] {
+                    for f_x in 0..FEATURE_MAP_SHAPES[index] {
+                        // eprintln!(
+                        //     "index: {}, shape: {:?}, coord: {:?}",
+                        //     index,
+                        //     scores[index].shape(),
+                        //     (anchor_index * NUM_CLASSES + class_index, f_y, f_x)
+                        // );
+                        let q = scores[index]
+                            .get((anchor_index * NUM_CLASSES + class_index, f_y, f_x))
+                            .unwrap();
+                        if *q >= SCORE_THRESHOLD {
+                            filtered.push((
+                                *q,
+                                self.output_base_index[index]
+                                    + f_y * FEATURE_MAP_SHAPES[index]
+                                    + f_x
+                                    + anchor_index * ANCHOR_STRIDES[index],
+                            ));
                         }
                     }
                 }
@@ -112,60 +113,43 @@ impl RustPostprocessor {
     fn filter_results(
         &self,
         query_index: f32,
-        scores: &[&[u8]],
+        scores: &[Array3<f32>],
         boxes: &[BoundingBox],
     ) -> DetectionResults {
-        if self.parallel_processing {
-            let mut results = vec![Vec::new(); NUM_CLASSES - 1];
-            results.par_iter_mut().enumerate().for_each(|(i, results)| {
-                self.filter_result(query_index, scores, boxes, i + 1, results, 0)
-            });
-            results.into_iter().flatten().collect_vec().into()
-        } else {
-            let mut results = Vec::with_capacity(CHANNEL_COUNT);
-            for class_index in 1..NUM_CLASSES {
-                let offset = results.len();
-                self.filter_result(query_index, scores, boxes, class_index, &mut results, offset);
-            }
-            results.into()
-        }
+        let mut results = vec![Vec::new(); NUM_CLASSES - 1];
+        results.par_iter_mut().enumerate().for_each(|(i, results)| {
+            self.filter_result(query_index, scores, boxes, i + 1, results, 0)
+        });
+        results.into_iter().flatten().collect_vec().into()
     }
 
-    fn decode_box(&self, boxes: &[&[u8]]) -> Vec<BoundingBox> {
+    fn decode_box(&self, boxes: &[Array3<f32>]) -> Vec<BoundingBox> {
         let mut ret = unsafe { uninitialized_vec(CHANNEL_COUNT) };
-        let output_deq_tables = &self.output_deq_tables;
-        let output_exp_scale_deq_tables = &self.output_exp_scale_deq_tables;
-        let output_base_index = &self.output_base_index;
-        let box_lowered_shapes = &self.box_lowered_shapes;
 
-        for index in 0..boxes.len() {
+        for (index, b) in boxes.iter().enumerate() {
             let anchor_stride = ANCHOR_STRIDES[index];
-            let deq_table = &output_deq_tables[index + 6];
-            let exp_scale_table = &output_exp_scale_deq_tables[index + 6];
-            let shape = &box_lowered_shapes[index];
-            let b = boxes[index];
+
             debug_assert!(!b.is_empty());
             for anchor_index in 0..NUM_ANCHORS[index] {
                 for f_y in 0..FEATURE_MAP_SHAPES[index] {
                     for f_x in 0..FEATURE_MAP_SHAPES[index] {
                         let feature_index = f_y * FEATURE_MAP_SHAPES[index] + f_x;
-                        // TODO `b` 를 cache-friendly 하게 접근하는 lowered shape 고민
-                        let q0 = b[shape.index(anchor_index * 4, f_y, f_x)];
-                        let q1 = b[shape.index(anchor_index * 4 + 1, f_y, f_x)];
-                        let q2 = b[shape.index(anchor_index * 4 + 2, f_y, f_x)];
-                        let q3 = b[shape.index(anchor_index * 4 + 3, f_y, f_x)];
 
-                        let bx = CenteredBox {
-                            pcy: deq_table[q0 as usize],
-                            pcx: deq_table[q1 as usize],
-                            ph: exp_scale_table[q2 as usize],
-                            pw: exp_scale_table[q3 as usize],
-                        };
+                        let q0 = *b.get((anchor_index * 4, f_y, f_x)).unwrap();
+                        let q1 = *b.get((anchor_index * 4 + 1, f_y, f_x)).unwrap();
+                        let q2 = *b.get((anchor_index * 4 + 2, f_y, f_x)).unwrap();
+                        let q3 = *b.get((anchor_index * 4 + 3, f_y, f_x)).unwrap();
 
-                        let box_index =
-                            output_base_index[index] + feature_index + anchor_index * anchor_stride;
+                        let q2 = f32::exp(q2 * SCALE_WH / SCALE_XY);
+                        let q3 = f32::exp(q3 * SCALE_WH / SCALE_XY);
+
+                        let bx = CenteredBox { pcy: q0, pcx: q1, ph: q2, pw: q3 };
+
+                        let box_index = self.output_base_index[index]
+                            + feature_index
+                            + anchor_index * anchor_stride;
                         // TODO `prior_index` 대신 `box_index` 를 사용할 수 있도록 `self.box_priors` 의 배열 변경
-                        let prior_index = output_base_index[index]
+                        let prior_index = self.output_base_index[index]
                             + feature_index * NUM_ANCHORS[index]
                             + anchor_index;
 
@@ -178,84 +162,18 @@ impl RustPostprocessor {
     }
 }
 
-impl<'a> From<&'a ModelOutputInfo> for RustPostprocessor {
-    fn from(model: &'a ModelOutputInfo) -> Self {
-        assert_eq!(model.outputs.len(), NUM_OUTPUTS);
-
-        let mut output_deq_tables = [[0f32; 256]; NUM_OUTPUTS];
-        let mut output_exp_scale_deq_tables = [[0f32; 256]; NUM_OUTPUTS];
-        let mut score_lowered_shapes = [Default::default(); NUM_OUTPUTS / 2];
-        let mut box_lowered_shapes = [Default::default(); NUM_OUTPUTS / 2];
-        let mut score_thresholds = [Default::default(); NUM_OUTPUTS / 2];
-        for (i, tensor_meta) in model.outputs.iter().enumerate() {
-            let (s, z) = tensor_meta.get_scale_and_zero_point();
-            let mut table = [0f32; 256];
-            let mut exp_scale_table = [0f32; 256];
-            for q in -128..=127 {
-                let index = (q as u8) as usize;
-                let x = (s * f64::from(q - z)) as f32;
-                if i < 6 {
-                    table[index] = f32::exp(x) / (1f32 + f32::exp(x));
-                } else {
-                    table[index] = x * SCALE_XY;
-                    exp_scale_table[index] = f32::exp(x * SCALE_WH);
-                };
-            }
-            if let Some(i) = i.checked_sub(NUM_OUTPUTS / 2) {
-                box_lowered_shapes[i] = tensor_meta.indexer;
-            } else {
-                score_lowered_shapes[i] = tensor_meta.indexer;
-
-                score_thresholds[i] = (i8::MIN..=i8::MAX).find(|&q| {
-                    let index = q as u8 as usize;
-                    table[index] > SCORE_THRESHOLD
-                });
-            }
-
-            output_deq_tables[i] = table;
-            output_exp_scale_deq_tables[i] = exp_scale_table;
-        }
-
-        let mut output_base_index = [0usize; 7];
-        for i in 0..6 {
-            output_base_index[i + 1] = output_base_index[i]
-                + NUM_ANCHORS[i] * FEATURE_MAP_SHAPES[i] * FEATURE_MAP_SHAPES[i];
-        }
-
-        let box_priors = include_bytes!("../../models/ssd_small_precomputed_priors")
-            .chunks(SIZE_OF_F32 * 4)
-            .map(|bytes| {
-                let (py1, px1, py2, px2) = bytes
-                    .chunks(SIZE_OF_F32)
-                    .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
-                    .tuples()
-                    .next()
-                    .unwrap();
-                BoundingBox { py1, px1, py2, px2 }.into()
-            })
-            .collect();
-
-        Self {
-            output_deq_tables,
-            output_exp_scale_deq_tables,
-            output_base_index,
-            score_thresholds,
-            score_lowered_shapes,
-            box_lowered_shapes,
-            box_priors,
-            parallel_processing: false,
-        }
-    }
-}
-
-impl Postprocess for RustPostprocessor {
+impl RustPostprocessor {
     #[tracing::instrument(
         target = "chrome_layer",
         fields(name = "PostProcess", cat = "Mlperf"),
-        skip(self, data)
+        skip(self, scores, boxes)
     )]
-    fn postprocess(&self, index: f32, data: &[&[u8]]) -> DetectionResults {
-        let (scores, boxes) = data.split_at(6);
+    fn postprocess(
+        &self,
+        index: f32,
+        scores: &[Array3<f32>],
+        boxes: &[Array3<f32>],
+    ) -> DetectionResults {
         let boxes = self.decode_box(boxes);
         debug_assert_eq!(boxes.len(), CHANNEL_COUNT);
         self.filter_results(index, scores, &boxes)
@@ -424,6 +342,8 @@ pub mod cxx {
 }
 
 const OUTPUT_NUM: usize = 12;
+const BOXES_NUM: usize = 6;
+const SCORES_NUM: usize = 6;
 
 /// RustPostProcessor
 ///
@@ -432,17 +352,15 @@ const OUTPUT_NUM: usize = 12;
 ///
 /// Args:
 ///     dfg (bytes): a binary of DFG IR
+// FIXME: Rename the struct. We can customize the python class name (see https://docs.rs/pyo3/latest/pyo3/attr.pyclass.html)
 #[pyclass]
 pub struct RustPostProcessor(RustPostprocessor);
 
 #[pymethods]
 impl RustPostProcessor {
     #[new]
-    fn new(dfg: &[u8]) -> PyResult<Self> {
-        let graph = create_graph_from_binary_with_header(dfg)
-            .map_err(|e| PyValueError::new_err(format!("invalid DFG format: {e:?}")))?;
-
-        Ok(Self(RustPostprocessor::new(&graph)))
+    fn new() -> PyResult<Self> {
+        Ok(Self(RustPostprocessor::new()))
     }
 
     /// Evaluate the postprocess
@@ -452,16 +370,49 @@ impl RustPostProcessor {
     ///
     /// Returns:
     ///     List[PyDetectionResult]: Output tensors
-    fn eval(&self, inputs: &PyList) -> PyResult<Vec<PyDetectionResult>> {
-        if inputs.len() != OUTPUT_NUM {
+    fn eval(&self, boxes: &PyList, scores: &PyList) -> PyResult<Vec<PyDetectionResult>> {
+        if boxes.len() != BOXES_NUM {
             return Err(PyValueError::new_err(format!(
-                "expected {OUTPUT_NUM} input tensors but got {}",
-                inputs.len()
+                "expected {BOXES_NUM} input boxes but got {}",
+                boxes.len()
+            )));
+        }
+        if scores.len() != SCORES_NUM {
+            return Err(PyValueError::new_err(format!(
+                "expected {SCORES_NUM} input scores but got {}",
+                scores.len()
             )));
         }
 
-        let slices = convert_to_slices(inputs)?;
-        Ok(self.0.postprocess(0f32, &slices).0.into_iter().map(PyDetectionResult::new).collect())
+        // TODO: improve conversion below
+
+        let boxes = downcast_to_f32(boxes)?;
+        let scores = downcast_to_f32(scores)?;
+
+        let boxes2 = boxes.iter().map(|a| a.readonly()).collect_vec();
+        let scores2 = scores.iter().map(|a| a.readonly()).collect_vec();
+
+        let boxes3 = boxes2.iter().map(|a| a.as_array()).collect_vec();
+        let scores3 = scores2.iter().map(|a| a.as_array()).collect_vec();
+
+        let boxes4 = boxes3
+            .iter()
+            .map(|b| ndarray::Zip::from(b).map_collect(|t| t * SCALE_XY))
+            .collect_vec();
+        let scores4 = scores3
+            .iter()
+            .map(|b| ndarray::Zip::from(b).map_collect(|&t| f32::exp(t) / (1f32 + f32::exp(t))))
+            .collect_vec();
+
+        // TODO: assert shape here
+
+        Ok(self
+            .0
+            .postprocess(0f32, &scores4, &boxes4)
+            .0
+            .into_iter()
+            .map(PyDetectionResult::new)
+            .collect())
     }
 }
 
