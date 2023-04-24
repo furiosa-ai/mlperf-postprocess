@@ -1,11 +1,3 @@
-### Requirements
-
-To install furiosa packages, see the apt repo setup guide in Notion
-
-```
-apt install furiosa-libnux-extrinsic
-```
-
 ### Build & publish
 
 To build wheels, please run the following
