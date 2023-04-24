@@ -92,7 +92,7 @@ pub(crate) fn convert_to_slices(inputs: &PyList) -> PyResult<Vec<&[u8]>> {
 
     let mut memories: Vec<&[u8]> = unsafe { uninitialized_vec(input_len) };
     for (index, tensor) in inputs.into_iter().enumerate() {
-        let tensor = tensor.downcast::<PyArrayDyn<i8>>()?;
+        let tensor = tensor.downcast::<PyArrayDyn<u8>>()?;
         if !tensor.is_c_contiguous() {
             return Err(PyValueError::new_err(format!("{index}th tensor is not C-contiguous")));
         }
