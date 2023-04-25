@@ -125,13 +125,12 @@ impl RustPostprocessor {
                 for h in 0..FEATURE_MAP_SHAPES[output_index] {
                     for w in 0..FEATURE_MAP_SHAPES[output_index] {
                         let c = class_index * num_anchor + anchor_index;
-                        let q = scores[output_index].get((c, h, w)).unwrap();
                         let scores_sum_index = self.output_base_index[output_index]
                             + h * FEATURE_MAP_SHAPES[output_index]
                             + w
                             + anchor_index * ANCHOR_STRIDES[output_index];
 
-                        decoded[scores_sum_index] = *q;
+                        decoded[scores_sum_index] = *scores[output_index].get((c, h, w)).unwrap();
                     }
                 }
             }
@@ -168,15 +167,17 @@ impl RustPostprocessor {
                     for f_x in 0..FEATURE_MAP_SHAPES[index] {
                         let feature_index = f_y * FEATURE_MAP_SHAPES[index] + f_x;
 
-                        let q0 = *b.get((anchor_index, f_y, f_x)).unwrap();
-                        let q1 = *b.get((anchor_index + NUM_ANCHORS[index], f_y, f_x)).unwrap();
-                        let q2 = *b.get((anchor_index + 2 * NUM_ANCHORS[index], f_y, f_x)).unwrap();
-                        let q3 = *b.get((anchor_index + 3 * NUM_ANCHORS[index], f_y, f_x)).unwrap();
+                        let pcx = *b.get((anchor_index, f_y, f_x)).unwrap();
+                        let pcy = *b.get((anchor_index + NUM_ANCHORS[index], f_y, f_x)).unwrap();
+                        let unscaled_pw =
+                            *b.get((anchor_index + 2 * NUM_ANCHORS[index], f_y, f_x)).unwrap();
+                        let unscaled_ph =
+                            *b.get((anchor_index + 3 * NUM_ANCHORS[index], f_y, f_x)).unwrap();
 
-                        let q2 = f32::exp(q2 * SCALE_WH / SCALE_XY);
-                        let q3 = f32::exp(q3 * SCALE_WH / SCALE_XY);
+                        let pw = f32::exp(unscaled_pw * SCALE_WH / SCALE_XY);
+                        let ph = f32::exp(unscaled_ph * SCALE_WH / SCALE_XY);
 
-                        let bx = CenteredBox { pcy: q1, pcx: q0, ph: q3, pw: q2 };
+                        let bx = CenteredBox { pcy, pcx, ph, pw };
 
                         let box_index = self.output_base_index[index]
                             + feature_index
@@ -257,31 +258,21 @@ impl RustPostProcessor {
             )));
         }
 
-        // TODO: improve conversion below
-
         let boxes = downcast_to_f32(boxes)?;
         let scores = downcast_to_f32(scores)?;
 
-        let boxes2 = boxes.iter().map(|a| a.readonly()).collect_vec();
-        let scores2 = scores.iter().map(|a| a.readonly()).collect_vec();
-
-        let boxes3 = boxes2.iter().map(|a| a.as_array()).collect_vec();
-        let scores3 = scores2.iter().map(|a| a.as_array()).collect_vec();
-
-        let boxes4 = boxes3
-            .iter()
-            .map(|b| ndarray::Zip::from(b).map_collect(|t| t * SCALE_XY))
-            .collect_vec();
-        let scores4 = scores3
-            .iter()
-            .map(|b| ndarray::Zip::from(b).map_collect(|&t| f32::exp(t)))
-            .collect_vec();
-
-        // TODO: assert shape here
+        let mut scaled_boxes = vec![];
+        let mut exp_scores = vec![];
+        for b in boxes {
+            scaled_boxes.push(ndarray::Zip::from(b.as_array()).map_collect(|t| t * SCALE_XY));
+        }
+        for s in scores {
+            exp_scores.push(ndarray::Zip::from(s.as_array()).map_collect(|&t| f32::exp(t)));
+        }
 
         Ok(self
             .0
-            .postprocess(0f32, &scores4, &boxes4)
+            .postprocess(0f32, &exp_scores, &scaled_boxes)
             .0
             .into_iter()
             .map(PyDetectionResult::new)

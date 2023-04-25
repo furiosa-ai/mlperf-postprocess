@@ -1,6 +1,6 @@
 pub mod ssd_postprocess;
 
-use numpy::PyArray3;
+use numpy::{PyArray3, PyReadonlyArray3};
 use pyo3::{self, pyclass, pymethods, types::PyList, PyResult};
 use ssd_postprocess::{DetectionResult, DetectionResults};
 
@@ -83,11 +83,11 @@ impl From<DetectionResults> for PyDetectionResults {
     }
 }
 
-pub(crate) fn downcast_to_f32(inputs: &PyList) -> PyResult<Vec<&PyArray3<f32>>> {
+pub(crate) fn downcast_to_f32(inputs: &PyList) -> PyResult<Vec<PyReadonlyArray3<f32>>> {
     let mut ret = Vec::with_capacity(inputs.len());
 
     for tensor in inputs.into_iter() {
-        let tensor = tensor.downcast::<PyArray3<f32>>()?;
+        let tensor = tensor.downcast::<PyArray3<f32>>()?.readonly();
 
         ret.push(tensor);
     }
