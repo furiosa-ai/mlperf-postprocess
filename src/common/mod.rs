@@ -83,7 +83,7 @@ impl From<DetectionResults> for PyDetectionResults {
     }
 }
 
-pub(crate) fn downcast_to_f32(inputs: &PyList) -> PyResult<Vec<PyReadonlyArray3<f32>>> {
+pub(crate) fn downcast_to_f32(inputs: &PyList) -> PyResult<Vec<PyReadonlyArray3<'_, f32>>> {
     let mut ret = Vec::with_capacity(inputs.len());
 
     for tensor in inputs.into_iter() {
