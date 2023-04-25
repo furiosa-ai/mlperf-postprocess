@@ -7,7 +7,6 @@ exclude = ["models"]
 
 [features]
 legacy-npu-tools = []
-cpp_impl = ["cpp", "cpp_build", "cbindgen"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
@@ -15,7 +14,6 @@ name = "furiosa_native_postprocess"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-cpp = { version = "0.5.8", optional = true }
 crc = "3.0.1"
 eyre = "0.6.8"
 indexmap = "1.9.3"
@@ -31,6 +29,4 @@ rulinalg = "0.4.2"
 tracing = "0.1.37"
 
 [build-dependencies]
-cbindgen = { version = "0.24.3", optional = true }
-cpp_build = { version = "0.5.8", optional = true }
 prost-build = "0.11.9"

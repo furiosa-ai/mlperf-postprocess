@@ -7,7 +7,6 @@ maturin build --release
 ```
 
 We provide a dedicated Dockerfile and build script to automate building manylinux-compatible wheels.
-If you have `docker` and `furiosa-libnux-extrinsic` packages installed, you can build manylinux wheels by running the following
 
 ```
 make wheel

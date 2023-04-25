@@ -4,28 +4,6 @@ use std::path::PathBuf;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let out_dir = PathBuf::from(env::var("OUT_DIR")?);
 
-    #[cfg(feature = "cpp_impl")]
-    {
-        cbindgen::Builder::new()
-            .with_crate(env::var("CARGO_MANIFEST_DIR").unwrap())
-            .with_config(cbindgen::Config {
-                include_guard: Some("bindings_h".to_string()),
-                language: cbindgen::Language::Cxx,
-                ..cbindgen::Config::default()
-            })
-            .generate()
-            .expect("Unable to generate bindings")
-            .write_to_file(out_dir.join("bindings.h"));
-
-        cpp_build::Config::new()
-            .flag("-march=native")
-            .flag("-std=c++17")
-            .flag("-fopenmp")
-            .include(&out_dir)
-            .opt_level(3)
-            .build("src/lib.rs");
-    }
-
     let proto_files = &[
         "npu_ir/dfg.proto",
         "npu_ir/element_type.proto",

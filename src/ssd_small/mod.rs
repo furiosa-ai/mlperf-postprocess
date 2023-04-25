@@ -4,7 +4,7 @@ extern crate openmp_sys;
 use std::mem;
 
 use itertools::Itertools;
-use ndarray::{Array3, ArrayView3, ArrayViewD};
+use ndarray::Array3;
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyList};
 use rayon::prelude::*;
 
@@ -19,8 +19,6 @@ const NUM_ANCHORS: [usize; 6] = [3, 6, 6, 6, 6, 6];
 const CHANNEL_COUNT: usize = 1917;
 const NUM_CLASSES: usize = 91;
 const SIZE_OF_F32: usize = mem::size_of::<f32>();
-// 0~5 scores 6~11 boxes
-const NUM_OUTPUTS: usize = 12;
 const SCALE_XY: f32 = 0.1;
 const SCALE_WH: f32 = 0.2;
 const SCORE_THRESHOLD: f32 = 0.3f32;
@@ -30,6 +28,12 @@ const NMS_THRESHOLD: f32 = 0.6f32;
 pub struct RustPostprocessor {
     output_base_index: [usize; 7],
     box_priors: Vec<CenteredBox>,
+}
+
+impl Default for RustPostprocessor {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RustPostprocessor {
@@ -172,168 +176,6 @@ impl RustPostprocessor {
     }
 }
 
-#[cfg(feature = "cpp_impl")]
-pub mod cxx {
-    use cpp::cpp;
-
-    use super::*;
-
-    cpp! {{
-        #include "cpp/unlower.h"
-        #include "cpp/ssd_small.h"
-        #include "bindings.h"
-    }}
-
-    #[derive(Debug, Clone)]
-    pub struct CppPostprocessor;
-
-    impl Postprocess for CppPostprocessor {
-        #[allow(clippy::transmute_num_to_bytes)]
-        fn postprocess(&self, index: f32, data: &[&[u8]]) -> DetectionResults {
-            let data_ptr = data.as_ptr();
-
-            let mut ret = Vec::with_capacity(200);
-            let result_ptr = ret.as_mut_ptr();
-
-            let n = cpp!(unsafe [index as "float", data_ptr as "const U8Slice*", result_ptr as "DetectionResult*"] -> usize as "size_t" {
-                return ssd_small::post_inference<true>(index, data_ptr, result_ptr);
-            });
-            debug_assert!(n <= 200);
-            unsafe {
-                ret.set_len(n);
-            }
-
-            ret.into()
-        }
-    }
-
-    impl CppPostprocessor {
-        pub fn new(main: &GraphInfo) -> Self {
-            let model: ModelOutputInfo = main.into();
-            Self::from(&model)
-        }
-    }
-
-    impl<'a> From<&'a ModelOutputInfo> for CppPostprocessor {
-        fn from(model: &'a ModelOutputInfo) -> Self {
-            assert_eq!(model.outputs.len(), NUM_OUTPUTS);
-
-            let mut output_deq_tables = [[0f32; 256]; NUM_OUTPUTS];
-            let mut output_exp_scale_deq_tables = [[0f32; 256]; NUM_OUTPUTS];
-            let mut score_lowered_shapes: [TensorIndexer; NUM_OUTPUTS / 2] =
-                [Default::default(); NUM_OUTPUTS / 2];
-            let mut box_lowered_shapes: [TensorIndexer; NUM_OUTPUTS / 2] =
-                [Default::default(); NUM_OUTPUTS / 2];
-
-            for (i, tensor_meta) in model.outputs.iter().enumerate() {
-                let (s, z) = tensor_meta.get_scale_and_zero_point();
-                let mut table = [0f32; 256];
-                let mut exp_scale_table = [0f32; 256];
-                for q in -128..=127 {
-                    let index = (q as u8) as usize;
-                    let x = (s * f64::from(q - z)) as f32;
-                    if i < 6 {
-                        table[index] = f32::exp(x) / (1f32 + f32::exp(x));
-                    } else {
-                        table[index] = x * SCALE_XY;
-                        exp_scale_table[index] = f32::exp(x * SCALE_WH);
-                    };
-                }
-                if let Some(i) = i.checked_sub(NUM_OUTPUTS / 2) {
-                    box_lowered_shapes[i] = tensor_meta.indexer;
-                } else {
-                    score_lowered_shapes[i] = tensor_meta.indexer;
-                }
-
-                output_deq_tables[i] = table;
-                output_exp_scale_deq_tables[i] = exp_scale_table;
-            }
-
-            let mut output_base_index = [0usize; 7];
-            for i in 0..6 {
-                output_base_index[i + 1] = output_base_index[i]
-                    + NUM_ANCHORS[i] * FEATURE_MAP_SHAPES[i] * FEATURE_MAP_SHAPES[i];
-            }
-
-            {
-                let score_lowered_shapes_ptr = score_lowered_shapes.as_ptr();
-                let box_lowered_shapes_ptr = box_lowered_shapes.as_ptr();
-                let output_deq_tables_ptr = output_deq_tables.as_ptr();
-                let output_exp_scale_deq_tables_ptr = output_exp_scale_deq_tables.as_ptr();
-
-                let box_priors: Vec<CenteredBox> =
-                    include_bytes!("../../models/ssd_small_precomputed_priors")
-                        .chunks(SIZE_OF_F32 * 4)
-                        .map(|bytes| {
-                            let (py1, px1, py2, px2) = bytes
-                                .chunks(SIZE_OF_F32)
-                                .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
-                                .tuples()
-                                .next()
-                                .unwrap();
-                            BoundingBox { py1, px1, py2, px2 }.into()
-                        })
-                        .collect();
-                let box_priors_ptr = box_priors.as_ptr();
-
-                cpp!(unsafe [output_deq_tables_ptr as "float*", output_exp_scale_deq_tables_ptr as "float*", score_lowered_shapes_ptr as "LoweredShapeFromRust*", box_lowered_shapes_ptr as "LoweredShapeFromRust*", box_priors_ptr as "CenteredBox*"] {
-                    ssd_small::init(output_deq_tables_ptr, output_exp_scale_deq_tables_ptr, score_lowered_shapes_ptr, box_lowered_shapes_ptr, box_priors_ptr);
-
-                });
-            }
-
-            Self
-        }
-    }
-
-    #[pymethods]
-    impl CppPostProcessor {
-        #[new]
-        fn new(dfg: &[u8]) -> PyResult<Self> {
-            let graph = create_graph_from_binary_with_header(dfg)
-                .map_err(|e| PyValueError::new_err(format!("invalid DFG format: {e:?}")))?;
-
-            Ok(Self(CppPostprocessor::new(&graph)))
-        }
-
-        /// Evaluate the postprocess
-        ///
-        /// Args:
-        ///     inputs (Sequence[numpy.ndarray]): Input tensors
-        ///
-        /// Returns:
-        ///     List[PyDetectionResult]: Output tensors
-        fn eval(&self, inputs: &PyList) -> PyResult<Vec<PyDetectionResult>> {
-            if inputs.len() != OUTPUT_NUM {
-                return Err(PyValueError::new_err(format!(
-                    "expected {OUTPUT_NUM} input tensors but got {}",
-                    inputs.len()
-                )));
-            }
-
-            let slices = convert_to_slices(inputs)?;
-            Ok(self
-                .0
-                .postprocess(0f32, &slices)
-                .0
-                .into_iter()
-                .map(PyDetectionResult::new)
-                .collect())
-        }
-    }
-
-    /// CppPostProcessor
-    ///
-    /// It takes a DFG whose unlower part is removed.
-    /// The DFG binary must have magic number in its head.
-    ///
-    /// Args:
-    ///     dfg (bytes): a binary of DFG IR
-    #[pyclass]
-    pub struct CppPostProcessor(CppPostprocessor);
-}
-
-const OUTPUT_NUM: usize = 12;
 const BOXES_NUM: usize = 6;
 const SCORES_NUM: usize = 6;
 
@@ -411,11 +253,6 @@ impl RustPostProcessor {
 #[pymodule]
 pub(crate) fn ssd_mobilenet(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_class::<RustPostProcessor>()?;
-
-    #[cfg(feature = "cpp_impl")]
-    {
-        m.add_class::<cxx::CppPostProcessor>()?;
-    }
 
     Ok(())
 }
