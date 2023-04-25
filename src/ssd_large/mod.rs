@@ -421,7 +421,7 @@ pub mod cxx {
         #[new]
         fn new(dfg: &[u8]) -> PyResult<Self> {
             let graph = create_graph_from_binary_with_header(dfg)
-                .map_err(|e| PyErr::new::<PyValueError, _>(format!("invalid DFG format: {}", e)))?;
+                .map_err(|e| PyValueError::new_err(format!("invalid DFG format: {e:?}")))?;
 
             Ok(Self(CppPostprocessor::new(&graph)))
         }
@@ -433,12 +433,10 @@ pub mod cxx {
         ///
         /// Returns:
         ///     List[PyDetectionResult]: Output tensors
-        #[pyo3(text_signature = "(self, inputs: Sequence[numpy.ndarray])")]
         fn eval(&self, inputs: &PyList) -> PyResult<Vec<PyDetectionResult>> {
             if inputs.len() != OUTPUT_NUM {
-                return Err(PyErr::new::<PyValueError, _>(format!(
-                    "expected {} input tensors but got {}",
-                    OUTPUT_NUM,
+                return Err(PyValueError::new_err(format!(
+                    "expected {OUTPUT_NUM} input tensors but got {}",
                     inputs.len()
                 )));
             }
@@ -462,7 +460,6 @@ pub mod cxx {
     /// Args:
     ///     dfg (bytes): a binary of DFG IR
     #[pyclass]
-    #[pyo3(text_signature = "(dfg: bytes)")]
     pub struct CppPostProcessor(CppPostprocessor);
 }
 
@@ -476,7 +473,6 @@ const OUTPUT_NUM: usize = 12;
 /// Args:
 ///     dfg (bytes): a binary of DFG IR
 #[pyclass]
-#[pyo3(text_signature = "(dfg: bytes)")]
 pub struct RustPostProcessor(RustPostprocessor);
 
 #[pymethods]
@@ -484,7 +480,7 @@ impl RustPostProcessor {
     #[new]
     fn new(dfg: &[u8]) -> PyResult<Self> {
         let graph = create_graph_from_binary_with_header(dfg)
-            .map_err(|e| PyErr::new::<PyValueError, _>(format!("invalid DFG format: {}", e)))?;
+            .map_err(|e| PyValueError::new_err(format!("invalid DFG format: {e:?}")))?;
 
         Ok(Self(RustPostprocessor::new(&graph)))
     }
@@ -496,12 +492,10 @@ impl RustPostProcessor {
     ///
     /// Returns:
     ///     List[PyDetectionResult]: Output tensors
-    #[pyo3(text_signature = "(self, inputs: Sequence[numpy.ndarray])")]
     fn eval(&self, inputs: &PyList) -> PyResult<Vec<PyDetectionResult>> {
         if inputs.len() != OUTPUT_NUM {
-            return Err(PyErr::new::<PyValueError, _>(format!(
-                "expected {} input tensors but got {}",
-                OUTPUT_NUM,
+            return Err(PyValueError::new_err(format!(
+                "expected {OUTPUT_NUM} input tensors but got {}",
                 inputs.len()
             )));
         }

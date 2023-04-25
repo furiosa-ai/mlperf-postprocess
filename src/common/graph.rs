@@ -6,26 +6,37 @@ use prost::Message;
 
 use super::model::{ModelOutputInfo, TensorMeta};
 use crate::common::model::{ElementType, QuantizationParameter};
-use crate::common::proto::{self, dfg};
+use crate::common::proto;
 use crate::common::shape::TensorIndexer;
 
 pub type TensorIndex = u32;
 
-impl<'a> From<&'a proto::common::ElementType> for ElementType {
-    fn from(element_type: &'a proto::common::ElementType) -> Self {
+impl<'a> From<&'a proto::element_type::ElementType> for ElementType {
+    fn from(element_type: &'a proto::element_type::ElementType) -> Self {
         match element_type.inner.as_ref().unwrap() {
-            proto::common::element_type::Inner::Int8(inner) => {
+            proto::element_type::element_type::Inner::Int8(inner) => {
                 let quantization_info = inner.quantization_info.as_ref().unwrap();
                 assert_eq!(quantization_info.quantization_parameters.len(), 1);
 
-                let proto::common::QuantizationParameter { min, max } =
+                let proto::element_type::QuantizationParameter { min, max } =
                     quantization_info.quantization_parameters[0];
 
                 let scale = (max - min) / (i8::max_value() as f64 - i8::min_value() as f64);
                 let zero_point = i8::min_value() as i32 - (min / scale).round() as i32;
                 Self::Int8 { quantization_parameter: QuantizationParameter { scale, zero_point } }
             }
-            _ => unimplemented!("Only Int8 output type supported"),
+            proto::element_type::element_type::Inner::Uint8(inner) => {
+                let quantization_info = inner.quantization_info.as_ref().unwrap();
+                assert_eq!(quantization_info.quantization_parameters.len(), 1);
+
+                let proto::element_type::QuantizationParameter { min, max } =
+                    quantization_info.quantization_parameters[0];
+
+                let scale = (max - min) / (u8::max_value() as f64 - u8::min_value() as f64);
+                let zero_point = u8::min_value() as i32 - (min / scale).round() as i32;
+                Self::Uint8 { quantization_parameter: QuantizationParameter { scale, zero_point } }
+            }
+            _ => unimplemented!("Only Int8/Uint8 output type supported"),
         }
     }
 }
@@ -36,8 +47,8 @@ pub struct TensorInfo {
     element_type: ElementType,
 }
 
-impl<'a> From<&'a proto::common::Tensor> for TensorInfo {
-    fn from(tensor: &'a proto::common::Tensor) -> Self {
+impl<'a> From<&'a proto::tensor::Tensor> for TensorInfo {
+    fn from(tensor: &'a proto::tensor::Tensor) -> Self {
         Self {
             shape: tensor.shape.as_ref().unwrap().into(),
             element_type: tensor.element_type.as_ref().unwrap().into(),
@@ -58,7 +69,7 @@ impl TensorInfo {
 #[derive(Debug, Clone)]
 pub struct GraphInfo {
     pub outputs: Vec<TensorIndex>,
-    pub tensors: HashMap<TensorIndex, proto::common::Tensor>,
+    pub tensors: HashMap<TensorIndex, proto::tensor::Tensor>,
 }
 
 #[allow(clippy::from_over_into)]
@@ -83,13 +94,13 @@ impl<'a> Into<ModelOutputInfo> for &'a GraphInfo {
 }
 
 pub fn create_graph_from_binary(input: &[u8]) -> eyre::Result<GraphInfo> {
-    let graph = dfg::Graph::decode(input)?;
+    let graph = proto::dfg::Graph::decode(input)?;
 
     let tensors = graph
         .tensors
         .iter()
         .map(|(&tensor_index, tensor)| (tensor_index, tensor.clone()))
-        .collect::<HashMap<TensorIndex, proto::common::Tensor>>();
+        .collect::<HashMap<TensorIndex, proto::tensor::Tensor>>();
 
     Ok(GraphInfo { outputs: graph.outputs, tensors })
 }

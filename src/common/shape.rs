@@ -3,7 +3,6 @@ use itertools::Itertools;
 use lazy_static::lazy_static;
 
 use crate::common::proto;
-use crate::common::proto::common::{tensor_shape, TensorShape};
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct TensorIndexer {
@@ -16,14 +15,16 @@ pub struct TensorIndexer {
     pub ci_limit: usize,
 }
 
-impl<'a> From<&'a TensorShape> for TensorIndexer {
-    fn from(shape: &'a TensorShape) -> Self {
+impl<'a> From<&'a proto::shape::TensorShape> for TensorIndexer {
+    fn from(shape: &'a proto::shape::TensorShape) -> Self {
         match &shape.inner {
-            Some(tensor_shape::Inner::LabeledShape(tensor_shape::LabeledShapeInner {
-                inner: Some(labeled_shape),
-            })) => labeled_shape.into(),
-            Some(tensor_shape::Inner::LoweredActivationShape(
-                tensor_shape::LoweredActivationShapeInner { inner: Some(lowered_activation_shape) },
+            Some(proto::shape::tensor_shape::Inner::LabeledShape(
+                proto::shape::tensor_shape::LabeledShapeInner { inner: Some(labeled_shape) },
+            )) => labeled_shape.into(),
+            Some(proto::shape::tensor_shape::Inner::LoweredActivationShape(
+                proto::shape::tensor_shape::LoweredActivationShapeInner {
+                    inner: Some(lowered_activation_shape),
+                },
             )) => lowered_activation_shape.into(),
             _ => unimplemented!("Unsupported lowered shape: {:?}", shape),
         }
@@ -46,18 +47,18 @@ enum Axis {
 
 impl From<i32> for Axis {
     fn from(axis: i32) -> Self {
-        let axis = proto::common::Axis::from_i32(axis).unwrap();
+        let axis = proto::shape::Axis::from_i32(axis).unwrap();
         match axis {
-            proto::common::Axis::Width => Axis::W,
-            proto::common::Axis::Height => Axis::H,
-            proto::common::Axis::Channel => Axis::C,
-            proto::common::Axis::Batch => Axis::N,
-            proto::common::Axis::Group => Axis::G,
-            proto::common::Axis::WidthOuter => Axis::Wo,
-            proto::common::Axis::HeightOuter => Axis::Ho,
-            proto::common::Axis::ChannelOuter => Axis::Co,
-            proto::common::Axis::BatchOuter => Axis::No,
-            proto::common::Axis::GroupOuter => Axis::Go,
+            proto::shape::Axis::Width => Axis::W,
+            proto::shape::Axis::Height => Axis::H,
+            proto::shape::Axis::Channel => Axis::C,
+            proto::shape::Axis::Batch => Axis::N,
+            proto::shape::Axis::Group => Axis::G,
+            proto::shape::Axis::WidthOuter => Axis::Wo,
+            proto::shape::Axis::HeightOuter => Axis::Ho,
+            proto::shape::Axis::ChannelOuter => Axis::Co,
+            proto::shape::Axis::BatchOuter => Axis::No,
+            proto::shape::Axis::GroupOuter => Axis::Go,
         }
     }
 }
@@ -73,8 +74,8 @@ lazy_static! {
 #[derive(Debug, Default, Clone)]
 struct AxisSizeMap(pub IndexMap<Axis, usize>);
 
-impl<'a> From<&'a proto::common::AxisSizeMap> for AxisSizeMap {
-    fn from(axis_size_map: &'a proto::common::AxisSizeMap) -> Self {
+impl<'a> From<&'a proto::shape::AxisSizeMap> for AxisSizeMap {
+    fn from(axis_size_map: &'a proto::shape::AxisSizeMap) -> Self {
         let axis_size_map = axis_size_map
             .inner
             .iter()
@@ -89,8 +90,8 @@ struct LabeledShape {
     axis_size_map: AxisSizeMap,
 }
 
-impl<'a> From<&'a proto::common::LabeledShape> for LabeledShape {
-    fn from(shape: &'a proto::common::LabeledShape) -> Self {
+impl<'a> From<&'a proto::shape::LabeledShape> for LabeledShape {
+    fn from(shape: &'a proto::shape::LabeledShape) -> Self {
         Self { axis_size_map: shape.axis_size_map.as_ref().unwrap().into() }
     }
 }
@@ -113,8 +114,8 @@ impl LabeledShape {
     }
 }
 
-impl<'a> From<&'a proto::common::LabeledShape> for TensorIndexer {
-    fn from(shape: &'a proto::common::LabeledShape) -> Self {
+impl<'a> From<&'a proto::shape::LabeledShape> for TensorIndexer {
+    fn from(shape: &'a proto::shape::LabeledShape) -> Self {
         let shape: LabeledShape = shape.into();
         assert!(shape.is_nchw());
         Self {
@@ -136,8 +137,8 @@ struct LoweredActivationShape {
     partition_ndim: usize,
 }
 
-impl<'a> From<&'a proto::common::LoweredActivationShape> for LoweredActivationShape {
-    fn from(shape: &'a proto::common::LoweredActivationShape) -> Self {
+impl<'a> From<&'a proto::shape::LoweredActivationShape> for LoweredActivationShape {
+    fn from(shape: &'a proto::shape::LoweredActivationShape) -> Self {
         Self {
             axis_size_map: shape.axis_size_map.as_ref().unwrap().into(),
             #[cfg(feature = "legacy-npu-tools")]
@@ -200,8 +201,8 @@ impl LoweredActivationShape {
     }
 }
 
-impl<'a> From<&'a proto::common::LoweredActivationShape> for TensorIndexer {
-    fn from(shape: &'a proto::common::LoweredActivationShape) -> Self {
+impl<'a> From<&'a proto::shape::LoweredActivationShape> for TensorIndexer {
+    fn from(shape: &'a proto::shape::LoweredActivationShape) -> Self {
         let shape: LoweredActivationShape = shape.into();
         if shape.is_nhoco_hcw() {
             Self {

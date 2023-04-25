@@ -5,7 +5,7 @@ pub mod shape;
 pub mod ssd_postprocess;
 
 use numpy::PyArrayDyn;
-use pyo3::{self, exceptions::PyValueError, pyclass, pymethods, types::PyList, PyErr, PyResult};
+use pyo3::{self, exceptions::PyValueError, pyclass, pymethods, types::PyList, PyResult};
 use ssd_postprocess::{DetectionResult, DetectionResults};
 
 #[pyclass]
@@ -58,11 +58,11 @@ pub struct PyDetectionResult {
 #[pymethods]
 impl PyDetectionResult {
     fn __repr__(&self) -> String {
-        format!("{:?}", self)
+        format!("{self:?}")
     }
 
     fn __str__(&self) -> String {
-        format!("{:?}", self)
+        format!("{self:?}")
     }
 }
 
@@ -94,9 +94,7 @@ pub(crate) fn convert_to_slices(inputs: &PyList) -> PyResult<Vec<&[u8]>> {
     for (index, tensor) in inputs.into_iter().enumerate() {
         let tensor = tensor.downcast::<PyArrayDyn<i8>>()?;
         if !tensor.is_c_contiguous() {
-            return Err(PyErr::new::<PyValueError, _>(
-                "{}th tensor is not C-contiguous".to_string(),
-            ));
+            return Err(PyValueError::new_err(format!("{index}th tensor is not C-contiguous")));
         }
         let slice: &[u8] = unsafe {
             let raw_slice = tensor.as_slice()?;
