@@ -35,8 +35,7 @@ docker-wheel:
 
 wheel: docker-wheel
 	docker run --rm -it \
-		-v /usr/share/furiosa:/usr/share/furiosa \
 		-v `pwd`/wheels:/app/target/wheels \
 		-v `pwd`:/app \
 		mlperf-postprocess-wheel \
-		maturin build --release --manylinux 2014
+		maturin build --release --manylinux 2014 -i python3.8 python3.9 python3.10
