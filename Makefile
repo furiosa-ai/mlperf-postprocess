@@ -19,10 +19,10 @@ install-deps:
 
 lint:
 	cargo fmt --all --check \
-	&& cargo -q clippy --release --features cpp_impl --all-targets -- -D rust_2018_idioms -D warnings
+	&& cargo -q clippy --release --all-targets -- -D rust_2018_idioms -D warnings
 
 test:
-	cargo test --release --features cpp_impl
+	cargo test --release
 
 docker-build: check-docker-tag
 	DOCKER_BUILDKIT=1 docker build -t asia-northeast3-docker.pkg.dev/next-gen-infra/furiosa-ai/mlperf-postprocess:${DOCKER_TAG} --secret id=furiosa.conf,src=/etc/apt/auth.conf.d/furiosa.conf -f docker/Dockerfile ./docker/
@@ -35,8 +35,7 @@ docker-wheel:
 
 wheel: docker-wheel
 	docker run --rm -it \
-		-v /usr/share/furiosa:/usr/share/furiosa \
 		-v `pwd`/wheels:/app/target/wheels \
 		-v `pwd`:/app \
 		mlperf-postprocess-wheel \
-		maturin build --release --manylinux 2014
+		maturin build --release --manylinux 2014 -i python3.8 python3.9 python3.10

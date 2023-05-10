@@ -1,11 +1,7 @@
-pub mod graph;
-pub mod model;
-pub mod proto;
-pub mod shape;
 pub mod ssd_postprocess;
 
-use numpy::PyArrayDyn;
-use pyo3::{self, exceptions::PyValueError, pyclass, pymethods, types::PyList, PyResult};
+use numpy::{PyArray3, PyReadonlyArray3};
+use pyo3::{self, pyclass, pymethods, types::PyList, PyResult};
 use ssd_postprocess::{DetectionResult, DetectionResults};
 
 #[pyclass]
@@ -87,23 +83,16 @@ impl From<DetectionResults> for PyDetectionResults {
     }
 }
 
-pub(crate) fn convert_to_slices(inputs: &PyList) -> PyResult<Vec<&[u8]>> {
-    let input_len = inputs.len();
+pub(crate) fn downcast_to_f32(inputs: &PyList) -> PyResult<Vec<PyReadonlyArray3<'_, f32>>> {
+    let mut ret = Vec::with_capacity(inputs.len());
 
-    let mut memories: Vec<&[u8]> = unsafe { uninitialized_vec(input_len) };
-    for (index, tensor) in inputs.into_iter().enumerate() {
-        let tensor = tensor.downcast::<PyArrayDyn<i8>>()?;
-        if !tensor.is_c_contiguous() {
-            return Err(PyValueError::new_err(format!("{index}th tensor is not C-contiguous")));
-        }
-        let slice: &[u8] = unsafe {
-            let raw_slice = tensor.as_slice()?;
-            std::slice::from_raw_parts(raw_slice.as_ptr() as *const u8, raw_slice.len())
-        };
-        memories[index] = slice;
+    for tensor in inputs.into_iter() {
+        let tensor = tensor.downcast::<PyArray3<f32>>()?.readonly();
+
+        ret.push(tensor);
     }
 
-    Ok(memories)
+    Ok(ret)
 }
 
 // u8slice
