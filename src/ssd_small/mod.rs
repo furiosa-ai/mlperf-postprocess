@@ -4,7 +4,7 @@ extern crate openmp_sys;
 use std::mem;
 
 use itertools::Itertools;
-use ndarray::Array3;
+use ndarray::ArrayView3;
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyList};
 use rayon::prelude::*;
 
@@ -63,7 +63,7 @@ impl RustPostprocessor {
     fn filter_result(
         &self,
         query_index: f32,
-        scores: &[Array3<f32>],
+        scores: &[ArrayView3<f32>],
         boxes: &[BoundingBox],
         class_index: usize,
         results: &mut Vec<DetectionResult>,
@@ -109,7 +109,7 @@ impl RustPostprocessor {
     fn filter_results(
         &self,
         query_index: f32,
-        scores: &[Array3<f32>],
+        scores: &[ArrayView3<f32>],
         boxes: &[BoundingBox],
     ) -> DetectionResults {
         let mut results = vec![Vec::new(); NUM_CLASSES - 1];
@@ -119,7 +119,7 @@ impl RustPostprocessor {
         results.into_iter().flatten().collect_vec().into()
     }
 
-    fn decode_box(&self, boxes: &[Array3<f32>]) -> Vec<BoundingBox> {
+    fn decode_box(&self, boxes: &[ArrayView3<f32>]) -> Vec<BoundingBox> {
         let mut ret = unsafe { uninitialized_vec(CHANNEL_COUNT) };
 
         for (index, b) in boxes.iter().enumerate() {
@@ -164,11 +164,11 @@ impl RustPostprocessor {
         fields(name = "PostProcess", cat = "Mlperf"),
         skip(self, scores, boxes)
     )]
-    fn postprocess(
+    pub fn postprocess(
         &self,
         index: f32,
-        scores: &[Array3<f32>],
-        boxes: &[Array3<f32>],
+        scores: &[ArrayView3<f32>],
+        boxes: &[ArrayView3<f32>],
     ) -> DetectionResults {
         let boxes = self.decode_box(boxes);
         debug_assert_eq!(boxes.len(), CHANNEL_COUNT);
@@ -233,9 +233,12 @@ impl RustPostProcessor {
             );
         }
 
+        let scores = sigmoid_scores.iter().map(|s| s.view()).collect::<Vec<_>>();
+        let boxes = scaled_boxes.iter().map(|b| b.view()).collect::<Vec<_>>();
+
         Ok(self
             .0
-            .postprocess(0f32, &sigmoid_scores, &scaled_boxes)
+            .postprocess(0f32, &scores, &boxes)
             .0
             .into_iter()
             .map(PyDetectionResult::new)
