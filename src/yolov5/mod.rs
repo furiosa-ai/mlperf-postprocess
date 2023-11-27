@@ -127,8 +127,7 @@ impl RustPostprocessor {
         // Performs unstable argmax `indices = argmax(boxes.scores)`
         indices.sort_unstable_by(|&i, &j| boxes.scores[i].partial_cmp(&boxes.scores[j]).unwrap());
 
-        while !indices.is_empty() {
-            let cur_idx = indices.pop().unwrap();
+        while let Some(cur_idx) = indices.pop() {
             results.push(cur_idx);
 
             let xx1: Array1<f32> =
