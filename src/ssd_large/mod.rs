@@ -6,7 +6,9 @@ use std::mem;
 
 use itertools::Itertools;
 use ndarray::Array3;
-use pyo3::{exceptions::PyValueError, prelude::*, types::PyList};
+use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
+use pyo3::types::PyList;
 use rayon::prelude::*;
 
 use crate::common::ssd_postprocess::{BoundingBox, CenteredBox, DetectionResult, DetectionResults};

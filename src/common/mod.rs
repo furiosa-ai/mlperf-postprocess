@@ -1,7 +1,8 @@
 pub mod ssd_postprocess;
 
 use numpy::{PyArray3, PyReadonlyArray3};
-use pyo3::{self, pyclass, pymethods, types::PyList, PyResult};
+use pyo3::types::PyList;
+use pyo3::{self, pyclass, pymethods, PyResult};
 use ssd_postprocess::{DetectionResult, DetectionResults};
 
 #[pyclass]
