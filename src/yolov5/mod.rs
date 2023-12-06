@@ -80,11 +80,11 @@ impl RustPostprocessor {
                             if object_confidence <= conf_threshold {
                                 continue;
                             };
-                            let (max_class_idx, _max_class_confidence) = argmax(class_confs);
+                            let (max_class_idx, max_class_confidence) = argmax(class_confs);
                             // Low class confidence, skip
-                            // if object_confidence * max_class_confidence <= conf_threshold {
-                            //     continue;
-                            // }
+                            if object_confidence * max_class_confidence <= conf_threshold {
+                                continue;
+                            }
 
                             // (feat[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
                             // (feat[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
@@ -164,10 +164,18 @@ impl RustPostprocessor {
         conf_threshold: f32,
         iou_threshold: f32,
     ) -> Vec<DetectionResults> {
-        let detection_boxes = self.box_decode(inputs, conf_threshold);
+        let max_nms: usize = 30000;
+        let mut detection_boxes = self.box_decode(inputs, conf_threshold);
         // Inner vector for the result indexes in one image, outer vector for batch
-        let indices: Vec<Vec<usize>> =
-            detection_boxes.iter().map(|dbox| Self::nms(dbox, iou_threshold, None)).collect();
+        let indices: Vec<Vec<usize>> = detection_boxes
+            .iter_mut()
+            .map(|dbox| {
+                if dbox.len > max_nms {
+                    dbox.sort_by_score_and_trim(max_nms);
+                };
+                Self::nms(dbox, iou_threshold, None)
+            })
+            .collect();
 
         izip!(detection_boxes, indices)
             .map(|(dbox, indexes)| {
