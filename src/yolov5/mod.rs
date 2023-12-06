@@ -80,11 +80,11 @@ impl RustPostprocessor {
                             if object_confidence <= conf_threshold {
                                 continue;
                             };
-                            let (max_class_idx, max_class_confidence) = argmax(class_confs);
+                            let (max_class_idx, _max_class_confidence) = argmax(class_confs);
                             // Low class confidence, skip
-                            if object_confidence * max_class_confidence <= conf_threshold {
-                                continue;
-                            }
+                            // if object_confidence * max_class_confidence <= conf_threshold {
+                            //     continue;
+                            // }
 
                             // (feat[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
                             // (feat[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
@@ -94,7 +94,8 @@ impl RustPostprocessor {
                             ph.push(4.0 * bh * bh * ay);
                             pw.push(4.0 * bw * bw * ax);
 
-                            scores.push(object_confidence * max_class_confidence);
+                            // scores.push(object_confidence * max_class_confidence);
+                            scores.push(object_confidence);
                             classes.push(max_class_idx);
 
                             num_rows += 1;
