@@ -1,3 +1,8 @@
 [build-system]
-requires = ["maturin>=0.14,<0.15"]
+requires = [
+    "maturin[patchelf]~=1.1.0",
+    # a patched version of Zig is required to avoid excessive TLS usage from
+    # wrong glibc builds: https://github.com/ziglang/zig/pull/16970
+    "ziglang==0.12.0.dev.168+67db26566",
+]
 build-backend = "maturin"
