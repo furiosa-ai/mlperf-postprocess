@@ -122,10 +122,12 @@ impl RustPostprocessor {
         let mut indices: Vec<usize> = (0..boxes.len).collect();
         let mut results: Vec<usize> = Vec::new();
 
-        let areas: Array1<f32> = ((&boxes.x2 - &boxes.x1) * (&boxes.y2 - &boxes.y1)).to_owned();
+        let dx = (&boxes.x2 - &boxes.x1).map(|&v| f32::max(0., v));
+        let dy = (&boxes.y2 - &boxes.y1).map(|&v| f32::max(0., v));
+        let areas: Array1<f32> = dx * dy;
 
         // Performs unstable argmax `indices = argmax(boxes.scores)`
-        indices.sort_unstable_by(|&i, &j| boxes.scores[i].partial_cmp(&boxes.scores[j]).unwrap());
+        indices.sort_by(|&i, &j| boxes.scores[i].partial_cmp(&boxes.scores[j]).unwrap());
 
         while let Some(cur_idx) = indices.pop() {
             results.push(cur_idx);
