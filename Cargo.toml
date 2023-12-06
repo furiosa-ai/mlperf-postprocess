@@ -1,6 +1,6 @@
 [package]
 name = "furiosa-native-postprocess"
-version = "0.9.0"
+version = "0.9.0-dev1"
 edition = "2021"
 exclude = ["models"]
 
@@ -19,5 +19,4 @@ numpy = "0.20.0"
 openmp-sys = "1.2.3"
 pyo3 = { version = "0.20.0", features = ["extension-module"] }
 rayon = "1.8.0"
-rulinalg = "0.4.2"
 tracing = "0.1.40"

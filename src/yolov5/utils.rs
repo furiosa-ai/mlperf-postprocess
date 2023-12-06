@@ -64,3 +64,37 @@ impl DetectionBoxes {
         self.classes.append(ndarray::Axis(0), classes.view()).unwrap();
     }
 }
+
+// Copied from https://github.com/AtheMathmo/rulinalg/blob/master/src/utils.rs#L245
+/// Find argmax of slice.
+///
+/// Returns index of first occuring maximum.
+///
+/// # Examples
+///
+/// ```
+/// use rulinalg::utils;
+/// let a = vec![1.0, 2.0, 3.0, 4.0];
+///
+/// let c = utils::argmax(&a);
+/// assert_eq!(c.0, 3);
+/// assert_eq!(c.1, 4.0);
+/// ```
+pub fn argmax<T>(u: &[T]) -> (usize, T)
+where
+    T: Copy + PartialOrd,
+{
+    assert!(!u.is_empty());
+
+    let mut max_index = 0;
+    let mut max = u[max_index];
+
+    for (i, v) in u.iter().enumerate().skip(1) {
+        if max < *v {
+            max_index = i;
+            max = *v;
+        }
+    }
+
+    (max_index, max)
+}
