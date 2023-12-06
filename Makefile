@@ -1,21 +1,11 @@
 SHELL := /bin/bash -o pipefail
 
-TOOLCHAIN_VERSION=0.9.0-2
-ONNXRUNTIME_VERSION=1.13.1-2
-
-.PHONY: install-deps lint test
+.PHONY: lint test
 
 check-docker-tag:
 ifndef DOCKER_TAG
 	$(error "DOCKER_TAG is not set")
 endif
-
-install-deps:
-	apt-get install -y --allow-downgrades furiosa-libhal-warboy \
-		libonnxruntime=$(ONNXRUNTIME_VERSION) \
-		furiosa-libcompiler=$(TOOLCHAIN_VERSION) \
-		furiosa-libnux-extrinsic=$(TOOLCHAIN_VERSION) \
-		furiosa-libnux=$(TOOLCHAIN_VERSION)
 
 lint:
 	cargo fmt --all --check \
