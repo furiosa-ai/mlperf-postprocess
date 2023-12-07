@@ -66,7 +66,9 @@ impl DetectionBoxes {
 
     pub fn sort_by_score_and_trim(&mut self, len: usize) {
         let mut indices: Vec<usize> = (0..self.len).collect();
-        indices.sort_by(|&a, &b| (self.scores[b].partial_cmp(&self.scores[a]).unwrap()).reverse());
+        indices.sort_unstable_by(|&a, &b| {
+            (self.scores[b].partial_cmp(&self.scores[a]).unwrap()).reverse()
+        });
         indices.truncate(len);
 
         self.x1 = self.x1.select(ndarray::Axis(0), &indices).to_owned();
