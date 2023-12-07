@@ -127,7 +127,7 @@ impl RustPostprocessor {
         let areas: Array1<f32> = dx * dy;
 
         // Performs unstable argmax `indices = argmax(boxes.scores)`
-        indices.sort_by(|&i, &j| boxes.scores[i].partial_cmp(&boxes.scores[j]).unwrap());
+        indices.sort_unstable_by(|&i, &j| boxes.scores[i].partial_cmp(&boxes.scores[j]).unwrap());
 
         while let Some(cur_idx) = indices.pop() {
             results.push(cur_idx);

@@ -1,4 +1,4 @@
-use ndarray::{s, Array1};
+use ndarray::Array1;
 
 pub fn centered_box_to_ltrb_bulk(
     pcy: &Array1<f32>,
@@ -64,18 +64,10 @@ impl DetectionBoxes {
         self.classes.append(ndarray::Axis(0), classes.view()).unwrap();
     }
 
-    pub fn trim(&mut self, len: usize) {
-        self.x1 = self.x1.slice(s![..len]).to_owned();
-        self.y1 = self.y1.slice(s![..len]).to_owned();
-        self.x2 = self.x2.slice(s![..len]).to_owned();
-        self.y2 = self.y2.slice(s![..len]).to_owned();
-        self.scores = self.scores.slice(s![..len]).to_owned();
-        self.classes = self.classes.slice(s![..len]).to_owned();
-    }
-
     pub fn sort_by_score_and_trim(&mut self, len: usize) {
         let mut indices: Vec<usize> = (0..self.len).collect();
-        indices.sort_by(|&a, &b| self.scores[b].partial_cmp(&self.scores[a]).unwrap());
+        indices.sort_by(|&a, &b| (self.scores[b].partial_cmp(&self.scores[a]).unwrap()).reverse());
+        indices.truncate(len);
 
         self.x1 = self.x1.select(ndarray::Axis(0), &indices).to_owned();
         self.y1 = self.y1.select(ndarray::Axis(0), &indices).to_owned();
@@ -83,8 +75,6 @@ impl DetectionBoxes {
         self.y2 = self.y2.select(ndarray::Axis(0), &indices).to_owned();
         self.scores = self.scores.select(ndarray::Axis(0), &indices).to_owned();
         self.classes = self.classes.select(ndarray::Axis(0), &indices).to_owned();
-
-        self.trim(len);
     }
 }
 
