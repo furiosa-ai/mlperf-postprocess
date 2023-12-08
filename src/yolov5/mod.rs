@@ -1,11 +1,11 @@
 pub mod utils;
 use std::fmt;
 
-use itertools::izip;
+use itertools::{izip, Itertools};
 use ndarray::{Array1, Array3};
 use numpy::{PyReadonlyArray3, PyReadonlyArray5};
 use pyo3::prelude::*;
-use utils::{argmax, centered_box_to_ltrb_bulk, DetectionBoxes};
+use utils::{centered_box_to_ltrb_bulk, DetectionBoxes};
 
 use crate::common::ssd_postprocess::{BoundingBox, DetectionResult, DetectionResults};
 use crate::common::PyDetectionResults;
@@ -80,27 +80,30 @@ impl RustPostprocessor {
                             if object_confidence <= conf_threshold {
                                 continue;
                             };
-                            let (max_class_idx, max_class_confidence) = argmax(class_confs);
-                            // Low class confidence, skip
-                            if object_confidence * max_class_confidence <= conf_threshold {
-                                continue;
-                            }
+                            let candidates = (0..class_confs.len())
+                                .filter(|&i| class_confs[i] * object_confidence > conf_threshold)
+                                .collect_vec();
 
                             // (feat[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
                             // (feat[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
                             // yolov5 boundingbox format(center_x,center_y,width,height)
-                            pcy.push((by * 2.0 - 0.5 + y as f32) * stride);
-                            pcx.push((bx * 2.0 - 0.5 + x as f32) * stride);
-                            ph.push(4.0 * bh * bh * ay);
-                            pw.push(4.0 * bw * bw * ax);
+                            let cy = (by * 2.0 - 0.5 + y as f32) * stride;
+                            let cx = (bx * 2.0 - 0.5 + x as f32) * stride;
+                            let h = 4.0 * bh * bh * ay;
+                            let w = 4.0 * bw * bw * ax;
 
-                            // scores.push(object_confidence * max_class_confidence);
-                            scores.push(object_confidence);
-                            classes.push(max_class_idx);
+                            for c in candidates {
+                                pcy.push(cy);
+                                pcx.push(cx);
+                                ph.push(h);
+                                pw.push(w);
+                                scores.push(class_confs[c] * object_confidence);
+                                classes.push(c);
 
-                            num_rows += 1;
-                            if num_rows >= MAX_BOXES {
-                                break 'outer;
+                                num_rows += 1;
+                                if num_rows >= MAX_BOXES {
+                                    break 'outer;
+                                }
                             }
                         }
                     }
@@ -118,6 +121,8 @@ impl RustPostprocessor {
     /// Non-Maximum Suppression Algorithm
     /// Faster implementation by Malisiewicz et al.
     fn nms(boxes: &DetectionBoxes, iou_threshold: f32, epsilon: Option<f32>) -> Vec<usize> {
+        const MAX_BOXES: usize = 300;
+
         let epsilon = epsilon.unwrap_or(1e-5);
         let mut indices: Vec<usize> = (0..boxes.len).collect();
         let mut results: Vec<usize> = Vec::new();
@@ -130,6 +135,9 @@ impl RustPostprocessor {
         indices.sort_unstable_by(|&i, &j| boxes.scores[i].partial_cmp(&boxes.scores[j]).unwrap());
 
         while let Some(cur_idx) = indices.pop() {
+            if results.len() > MAX_BOXES {
+                break;
+            }
             results.push(cur_idx);
 
             let xx1: Array1<f32> =
@@ -147,9 +155,11 @@ impl RustPostprocessor {
             let ious = widths * heights;
             let cut_areas: Array1<f32> = indices.iter().map(|&i| areas[i]).collect();
             let overlap = &ious / (areas[cur_idx] + cut_areas - &ious + epsilon);
-            indices = (0..indices.len())
-                .filter(|&i| overlap[i] <= iou_threshold)
-                .map(|i| indices[i])
+
+            indices = indices
+                .into_iter()
+                .enumerate()
+                .filter_map(|(i, j)| (overlap[i] <= iou_threshold).then_some(j))
                 .collect();
         }
 

@@ -1,6 +1,3 @@
-#![allow(unused_extern_crates)]
-extern crate openmp_sys;
-
 use std::convert::TryInto;
 use std::mem;
 
