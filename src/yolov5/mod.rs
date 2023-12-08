@@ -120,15 +120,32 @@ impl RustPostprocessor {
 
     /// Non-Maximum Suppression Algorithm
     /// Faster implementation by Malisiewicz et al.
-    fn nms(boxes: &DetectionBoxes, iou_threshold: f32, epsilon: Option<f32>) -> Vec<usize> {
+    fn nms(
+        boxes: &DetectionBoxes,
+        iou_threshold: f32,
+        epsilon: Option<f32>,
+        agnostic: Option<bool>,
+    ) -> Vec<usize> {
         const MAX_BOXES: usize = 300;
-
+        const MAX_WH: f32 = 7680.;
+        let agnostic = agnostic.unwrap_or(false);
         let epsilon = epsilon.unwrap_or(1e-5);
+
+        let c = if agnostic {
+            Array1::zeros(boxes.len)
+        } else {
+            boxes.classes.mapv(|v| v as f32) * MAX_WH
+        };
+        let x1 = &boxes.x1 + &c;
+        let y1 = &boxes.y1 + &c;
+        let x2 = &boxes.x2 + &c;
+        let y2 = &boxes.y2 + &c;
+
         let mut indices: Vec<usize> = (0..boxes.len).collect();
         let mut results: Vec<usize> = Vec::new();
 
-        let dx = (&boxes.x2 - &boxes.x1).map(|&v| f32::max(0., v));
-        let dy = (&boxes.y2 - &boxes.y1).map(|&v| f32::max(0., v));
+        let dx = (&x2 - &x1).map(|&v| f32::max(0., v));
+        let dy = (&y2 - &y1).map(|&v| f32::max(0., v));
         let areas: Array1<f32> = dx * dy;
 
         // Performs unstable argmax `indices = argmax(boxes.scores)`
@@ -140,14 +157,10 @@ impl RustPostprocessor {
             }
             results.push(cur_idx);
 
-            let xx1: Array1<f32> =
-                indices.iter().map(|&i| f32::max(boxes.x1[cur_idx], boxes.x1[i])).collect();
-            let yy1: Array1<f32> =
-                indices.iter().map(|&i| f32::max(boxes.y1[cur_idx], boxes.y1[i])).collect();
-            let xx2: Array1<f32> =
-                indices.iter().map(|&i| f32::min(boxes.x2[cur_idx], boxes.x2[i])).collect();
-            let yy2: Array1<f32> =
-                indices.iter().map(|&i| f32::min(boxes.y2[cur_idx], boxes.y2[i])).collect();
+            let xx1: Array1<f32> = indices.iter().map(|&i| f32::max(x1[cur_idx], x1[i])).collect();
+            let yy1: Array1<f32> = indices.iter().map(|&i| f32::max(y1[cur_idx], y1[i])).collect();
+            let xx2: Array1<f32> = indices.iter().map(|&i| f32::min(x2[cur_idx], x2[i])).collect();
+            let yy2: Array1<f32> = indices.iter().map(|&i| f32::min(y2[cur_idx], y2[i])).collect();
 
             let widths = (xx2 - xx1).mapv(|v| f32::max(0.0, v));
             let heights = (yy2 - yy1).mapv(|v| f32::max(0.0, v));
@@ -173,6 +186,8 @@ impl RustPostprocessor {
         inputs: Vec<PyReadonlyArray5<'_, f32>>,
         conf_threshold: f32,
         iou_threshold: f32,
+        epsilon: Option<f32>,
+        agnostic: Option<bool>,
     ) -> Vec<DetectionResults> {
         let max_nms: usize = 30000;
         let mut detection_boxes = self.box_decode(inputs, conf_threshold);
@@ -183,7 +198,7 @@ impl RustPostprocessor {
                 if dbox.len > max_nms {
                     dbox.sort_by_score_and_trim(max_nms);
                 };
-                Self::nms(dbox, iou_threshold, None)
+                Self::nms(dbox, iou_threshold, epsilon, agnostic)
             })
             .collect();
 
@@ -240,6 +255,8 @@ impl RustPostProcessor {
     ///     inputs (Sequence[numpy.ndarray]): Input tensors
     ///     conf_threshold (float): Confidence threshold
     ///     iou_threshold (float): IoU threshold
+    ///     epsilon (Optional[float]): Epsilon for numerical stability
+    ///     agnostic (Optional[bool]): Whether to use agnostic NMS
     ///
     /// Returns:
     ///     List[numpy.ndarray]: Batched detection results
@@ -248,10 +265,12 @@ impl RustPostProcessor {
         inputs: Vec<PyReadonlyArray5<'_, f32>>,
         conf_threshold: f32,
         iou_threshold: f32,
+        epsilon: Option<f32>,
+        agnostic: Option<bool>,
     ) -> PyResult<Vec<PyDetectionResults>> {
         Ok(self
             .0
-            .postprocess(inputs, conf_threshold, iou_threshold)
+            .postprocess(inputs, conf_threshold, iou_threshold, epsilon, agnostic)
             .into_iter()
             .map(PyDetectionResults::from)
             .collect())
