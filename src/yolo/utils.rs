@@ -17,7 +17,7 @@ pub struct DetectionBoxes {
     pub x2: Array1<f32>,
     pub y2: Array1<f32>,
     pub scores: Array1<f32>,
-    pub classes: Array1<usize>,
+    pub classes: Array1<f32>,
     pub len: usize,
 }
 
@@ -28,7 +28,7 @@ impl DetectionBoxes {
         x2: Array1<f32>,
         y2: Array1<f32>,
         scores: Array1<f32>,
-        classes: Array1<usize>,
+        classes: Array1<f32>,
     ) -> Self {
         let len = x1.len();
         Self { x1, y1, x2, y2, scores, classes, len }
@@ -53,7 +53,7 @@ impl DetectionBoxes {
         x2: Array1<f32>,
         y2: Array1<f32>,
         scores: Array1<f32>,
-        classes: Array1<usize>,
+        classes: Array1<f32>,
     ) {
         self.len += x1.len();
         self.x1.append(ndarray::Axis(0), x1.view()).unwrap();
@@ -66,10 +66,9 @@ impl DetectionBoxes {
 
     pub fn sort_by_score_and_trim(&mut self, len: usize) {
         let mut indices: Vec<usize> = (0..self.len).collect();
-        indices.sort_unstable_by(|&a, &b| {
-            (self.scores[b].partial_cmp(&self.scores[a]).unwrap()).reverse()
-        });
+        indices.sort_unstable_by(|&a, &b| self.scores[b].partial_cmp(&self.scores[a]).unwrap());
         indices.truncate(len);
+        indices.reverse();
 
         self.x1 = self.x1.select(ndarray::Axis(0), &indices).to_owned();
         self.y1 = self.y1.select(ndarray::Axis(0), &indices).to_owned();

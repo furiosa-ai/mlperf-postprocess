@@ -2,18 +2,17 @@ pub mod utils;
 use std::fmt;
 
 use itertools::{izip, Itertools};
-use ndarray::{Array1, Array3};
-use numpy::{PyReadonlyArray3, PyReadonlyArray5};
+use ndarray::{Array1, Array2, Array3};
+use numpy::{PyArray2, PyReadonlyArray3, PyReadonlyArray5};
 use pyo3::prelude::*;
+use rayon::prelude::*;
 use utils::{centered_box_to_ltrb_bulk, DetectionBoxes};
-
-use crate::common::ssd_postprocess::{BoundingBox, DetectionResult, DetectionResults};
-use crate::common::PyDetectionResults;
 
 #[derive(Debug, Clone)]
 pub struct RustPostprocessor {
     pub anchors: Array3<f32>,
     pub strides: Vec<f32>,
+    pub agnostic: bool,
 }
 
 impl fmt::Display for RustPostprocessor {
@@ -21,21 +20,21 @@ impl fmt::Display for RustPostprocessor {
         let shape = self.anchors.shape();
         write!(
             f,
-            "RustPostProcessor {{ num_detection_layers: {}, num_anchor: {}, strides: {:?} }}",
-            shape[0], shape[1], self.strides
+            "RustPostProcessor {{ num_detection_layers: {}, num_anchor: {}, strides: {:?}, agnostic: {} }}",
+            shape[0], shape[1], self.strides, self.agnostic
         )
     }
 }
 
 impl RustPostprocessor {
-    fn new(anchors: Array3<f32>, strides: Vec<f32>) -> Self {
+    fn new(anchors: Array3<f32>, strides: Vec<f32>, agnostic: Option<bool>) -> Self {
         pub const NUM_ANCHOR_LAST: usize = 2;
         assert_eq!(
             anchors.shape()[2],
             NUM_ANCHOR_LAST,
             "anchors' last dimension must be {NUM_ANCHOR_LAST}"
         );
-        Self { anchors, strides }
+        Self { anchors, strides, agnostic: agnostic.unwrap_or(false) }
     }
 
     fn box_decode(
@@ -49,7 +48,7 @@ impl RustPostprocessor {
         let batch_size = inputs[0].shape()[0];
         let mut detection_boxes: Vec<DetectionBoxes> = vec![DetectionBoxes::empty(); batch_size];
 
-        'outer: for (&stride, anchors_inner_stride, inner_stride) in
+        for (&stride, anchors_inner_stride, inner_stride) in
             izip!(&self.strides, self.anchors.outer_iter(), inputs)
         {
             for (batch_index, inner_batch) in inner_stride.as_array().outer_iter().enumerate() {
@@ -60,8 +59,8 @@ impl RustPostprocessor {
                 let mut pw: Vec<f32> = Vec::with_capacity(MAX_BOXES);
 
                 let mut scores: Vec<f32> = Vec::with_capacity(MAX_BOXES);
-                let mut classes: Vec<usize> = Vec::with_capacity(MAX_BOXES);
-                for (anchors, inner_anchor) in
+                let mut classes: Vec<f32> = Vec::with_capacity(MAX_BOXES);
+                'outer: for (anchors, inner_anchor) in
                     izip!(anchors_inner_stride.outer_iter(), inner_batch.outer_iter())
                 {
                     let &[ax, ay] = (anchors.to_owned() * stride).as_slice().unwrap() else {
@@ -80,27 +79,34 @@ impl RustPostprocessor {
                             if object_confidence <= conf_threshold {
                                 continue;
                             };
-                            let candidates = (0..class_confs.len())
-                                .filter(|&i| unsafe {class_confs.get_unchecked(i)} * object_confidence > conf_threshold)
-                                .collect_vec();
 
+                            // Find candidates where `class_confidence * object_confidence > conf_threshold`
+                            let candidates = class_confs
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, &class_conf)| {
+                                    class_conf * object_confidence > conf_threshold
+                                })
+                                .collect_vec();
+                            if candidates.is_empty() {
+                                continue;
+                            }
+
+                            // Decode box
                             // (feat[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
                             // (feat[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
-                            // yolov5 boundingbox format(center_x,center_y,width,height)
                             let cy = (by * 2.0 - 0.5 + y as f32) * stride;
                             let cx = (bx * 2.0 - 0.5 + x as f32) * stride;
                             let h = 4.0 * bh * bh * ay;
                             let w = 4.0 * bw * bw * ax;
 
-                            for c in candidates {
+                            for (class_idx, class_conf) in candidates {
                                 pcy.push(cy);
                                 pcx.push(cx);
                                 ph.push(h);
                                 pw.push(w);
-                                scores.push(
-                                    unsafe { class_confs.get_unchecked(c) } * object_confidence,
-                                );
-                                classes.push(c);
+                                scores.push(class_conf * object_confidence);
+                                classes.push(class_idx as f32);
 
                                 num_rows += 1;
                                 if num_rows >= MAX_BOXES {
@@ -126,18 +132,13 @@ impl RustPostprocessor {
         boxes: &DetectionBoxes,
         iou_threshold: f32,
         epsilon: Option<f32>,
-        agnostic: Option<bool>,
+        agnostic: bool,
     ) -> Vec<usize> {
         const MAX_BOXES: usize = 300;
         const MAX_WH: f32 = 7680.;
-        let agnostic = agnostic.unwrap_or(false);
         let epsilon = epsilon.unwrap_or(1e-5);
 
-        let c = if agnostic {
-            Array1::zeros(boxes.len)
-        } else {
-            boxes.classes.mapv(|v| v as f32) * MAX_WH
-        };
+        let c = if agnostic { Array1::zeros(boxes.len) } else { boxes.classes.to_owned() * MAX_WH };
         let x1 = &boxes.x1 + &c;
         let y1 = &boxes.y1 + &c;
         let x2 = &boxes.x2 + &c;
@@ -158,27 +159,23 @@ impl RustPostprocessor {
         });
 
         while let Some(cur_idx) = indices.pop() {
-            if results.len() > MAX_BOXES {
+            if results.len() >= MAX_BOXES {
                 break;
             }
             results.push(cur_idx);
 
-            let xx1: Array1<f32> = indices
-                .iter()
-                .map(|&i| unsafe { f32::max(*x1.uget(cur_idx), *x1.uget(i)) })
-                .collect();
-            let yy1: Array1<f32> = indices
-                .iter()
-                .map(|&i| unsafe { f32::max(*y1.uget(cur_idx), *y1.uget(i)) })
-                .collect();
-            let xx2: Array1<f32> = indices
-                .iter()
-                .map(|&i| unsafe { f32::min(*x2.uget(cur_idx), *x2.uget(i)) })
-                .collect();
-            let yy2: Array1<f32> = indices
-                .iter()
-                .map(|&i| unsafe { f32::min(*y2.uget(cur_idx), *y2.uget(i)) })
-                .collect();
+            let xx1: Array1<f32> = unsafe {
+                indices.iter().map(|&i| f32::max(*x1.uget(cur_idx), *x1.uget(i))).collect()
+            };
+            let yy1: Array1<f32> = unsafe {
+                indices.iter().map(|&i| f32::max(*y1.uget(cur_idx), *y1.uget(i))).collect()
+            };
+            let xx2: Array1<f32> = unsafe {
+                indices.iter().map(|&i| f32::min(*x2.uget(cur_idx), *x2.uget(i))).collect()
+            };
+            let yy2: Array1<f32> = unsafe {
+                indices.iter().map(|&i| f32::min(*y2.uget(cur_idx), *y2.uget(i))).collect()
+            };
 
             let widths = (xx2 - xx1).mapv(|v| f32::max(0.0, v));
             let heights = (yy2 - yy1).mapv(|v| f32::max(0.0, v));
@@ -207,7 +204,7 @@ impl RustPostprocessor {
         iou_threshold: f32,
         epsilon: Option<f32>,
         agnostic: Option<bool>,
-    ) -> Vec<DetectionResults> {
+    ) -> Vec<Array2<f32>> {
         let max_nms: usize = 30_000;
         let mut detection_boxes = self.box_decode(inputs, conf_threshold);
         // Inner vector for the result indexes in one image, outer vector for batch
@@ -217,27 +214,26 @@ impl RustPostprocessor {
                 if dbox.len > max_nms {
                     dbox.sort_by_score_and_trim(max_nms);
                 };
-                Self::nms(dbox, iou_threshold, epsilon, agnostic)
+                Self::nms(dbox, iou_threshold, epsilon, agnostic.unwrap_or(self.agnostic))
             })
             .collect();
 
-        izip!(detection_boxes, indices)
-            .map(|(dbox, indexes)| {
-                DetectionResults(
-                    indexes
-                        .into_iter()
-                        .map(|i| {
-                            DetectionResult::new_detection_result(
-                                i as f32,
-                                BoundingBox::new_bounding_box(
-                                    dbox.y1[i], dbox.x1[i], dbox.y2[i], dbox.x2[i],
-                                ),
-                                dbox.scores[i],
-                                dbox.classes[i] as f32,
-                            )
-                        })
-                        .collect(),
-                )
+        detection_boxes
+            .par_iter()
+            .zip(indices)
+            .map(|(dbox, idx)| {
+                let mut results = unsafe { Array2::uninit((idx.len(), 6)).assume_init() };
+                for (i, &j) in idx.iter().enumerate() {
+                    unsafe {
+                        *results.uget_mut([i, 0]) = *dbox.x1.uget(j);
+                        *results.uget_mut([i, 1]) = *dbox.y1.uget(j);
+                        *results.uget_mut([i, 2]) = *dbox.x2.uget(j);
+                        *results.uget_mut([i, 3]) = *dbox.y2.uget(j);
+                        *results.uget_mut([i, 4]) = *dbox.scores.uget(j);
+                        *results.uget_mut([i, 5]) = *dbox.classes.uget(j);
+                    }
+                }
+                results
             })
             .collect()
     }
@@ -250,14 +246,19 @@ impl RustPostprocessor {
 /// Args:
 ///     anchors (numpy.ndarray): Anchors (3D Array)
 ///     strides (numpy.ndarray): Strides (1D Array)
+///     agnostic (Optional[bool]): Whether to use agnostic NMS, default is False
 #[pyclass]
 pub struct RustPostProcessor(RustPostprocessor);
 
 #[pymethods]
 impl RustPostProcessor {
     #[new]
-    fn new(anchors: PyReadonlyArray3<'_, f32>, strides: Vec<f32>) -> PyResult<Self> {
-        Ok(Self(RustPostprocessor::new(anchors.to_owned_array(), strides)))
+    fn new(
+        anchors: PyReadonlyArray3<'_, f32>,
+        strides: Vec<f32>,
+        agnostic: Option<bool>,
+    ) -> PyResult<Self> {
+        Ok(Self(RustPostprocessor::new(anchors.to_owned_array(), strides, agnostic)))
     }
 
     fn __repr__(&self) -> PyResult<String> {
@@ -275,28 +276,29 @@ impl RustPostProcessor {
     ///     conf_threshold (float): Confidence threshold
     ///     iou_threshold (float): IoU threshold
     ///     epsilon (Optional[float]): Epsilon for numerical stability
-    ///     agnostic (Optional[bool]): Whether to use agnostic NMS
+    ///     agnostic (Optional[bool]): Whether to use agnostic NMS, takes precedence constructor's
     ///
     /// Returns:
     ///     List[numpy.ndarray]: Batched detection results
     fn eval(
         &self,
+        py: Python<'_>,
         inputs: Vec<PyReadonlyArray5<'_, f32>>,
         conf_threshold: f32,
         iou_threshold: f32,
         epsilon: Option<f32>,
         agnostic: Option<bool>,
-    ) -> PyResult<Vec<PyDetectionResults>> {
+    ) -> PyResult<Vec<Py<PyArray2<f32>>>> {
         Ok(self
             .0
             .postprocess(inputs, conf_threshold, iou_threshold, epsilon, agnostic)
             .into_iter()
-            .map(PyDetectionResults::from)
+            .map(|results| PyArray2::from_owned_array(py, results).to_owned())
             .collect())
     }
 }
 
-pub(crate) fn yolov5(m: &PyModule) -> PyResult<()> {
+pub(crate) fn yolo(m: &PyModule) -> PyResult<()> {
     m.add_class::<RustPostProcessor>()?;
 
     Ok(())

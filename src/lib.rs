@@ -7,7 +7,7 @@ use pyo3::prelude::*;
 pub mod common;
 pub mod ssd_large;
 pub mod ssd_small;
-pub mod yolov5;
+pub mod yolo;
 
 fn add_submodule(
     m: &PyModule,
@@ -36,7 +36,10 @@ fn furiosa_native_postprocess(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
 
     add_submodule(m, ssd_large::ssd_resnet34, "ssd_large")?;
     add_submodule(m, ssd_small::ssd_mobilenet, "ssd_small")?;
-    add_submodule(m, yolov5::yolov5, "yolov5")?;
+    add_submodule(m, yolo::yolo, "yolo")?;
+
+    // backward compatibility
+    add_submodule(m, yolo::yolo, "yolov5")?;
 
     Ok(())
 }
