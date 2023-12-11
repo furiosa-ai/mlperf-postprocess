@@ -71,7 +71,7 @@ impl RustPostprocessor {
                         for (x, inner_x) in inner_y.outer_iter().enumerate() {
                             // Destruct output array
                             let &[bx, by, bw, bh, object_confidence, ref class_confs @ ..] =
-                                inner_x.as_slice().unwrap()
+                                inner_x.as_slice().expect("inner_x must be contiguous")
                             else {
                                 unreachable!()
                             };
@@ -81,7 +81,7 @@ impl RustPostprocessor {
                                 continue;
                             };
                             let candidates = (0..class_confs.len())
-                                .filter(|&i| class_confs[i] * object_confidence > conf_threshold)
+                                .filter(|&i| unsafe {class_confs.get_unchecked(i)} * object_confidence > conf_threshold)
                                 .collect_vec();
 
                             // (feat[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
@@ -97,7 +97,9 @@ impl RustPostprocessor {
                                 pcx.push(cx);
                                 ph.push(h);
                                 pw.push(w);
-                                scores.push(class_confs[c] * object_confidence);
+                                scores.push(
+                                    unsafe { class_confs.get_unchecked(c) } * object_confidence,
+                                );
                                 classes.push(c);
 
                                 num_rows += 1;
@@ -149,7 +151,11 @@ impl RustPostprocessor {
         let areas: Array1<f32> = dx * dy;
 
         // Performs unstable argmax `indices = argmax(boxes.scores)`
-        indices.sort_unstable_by(|&i, &j| boxes.scores[i].partial_cmp(&boxes.scores[j]).unwrap());
+        indices.sort_unstable_by(|&i, &j| {
+            let box_score_i = unsafe { boxes.scores.uget(i) };
+            let box_score_j = unsafe { boxes.scores.uget(j) };
+            box_score_i.partial_cmp(box_score_j).unwrap()
+        });
 
         while let Some(cur_idx) = indices.pop() {
             if results.len() > MAX_BOXES {
@@ -157,22 +163,35 @@ impl RustPostprocessor {
             }
             results.push(cur_idx);
 
-            let xx1: Array1<f32> = indices.iter().map(|&i| f32::max(x1[cur_idx], x1[i])).collect();
-            let yy1: Array1<f32> = indices.iter().map(|&i| f32::max(y1[cur_idx], y1[i])).collect();
-            let xx2: Array1<f32> = indices.iter().map(|&i| f32::min(x2[cur_idx], x2[i])).collect();
-            let yy2: Array1<f32> = indices.iter().map(|&i| f32::min(y2[cur_idx], y2[i])).collect();
+            let xx1: Array1<f32> = indices
+                .iter()
+                .map(|&i| unsafe { f32::max(*x1.uget(cur_idx), *x1.uget(i)) })
+                .collect();
+            let yy1: Array1<f32> = indices
+                .iter()
+                .map(|&i| unsafe { f32::max(*y1.uget(cur_idx), *y1.uget(i)) })
+                .collect();
+            let xx2: Array1<f32> = indices
+                .iter()
+                .map(|&i| unsafe { f32::min(*x2.uget(cur_idx), *x2.uget(i)) })
+                .collect();
+            let yy2: Array1<f32> = indices
+                .iter()
+                .map(|&i| unsafe { f32::min(*y2.uget(cur_idx), *y2.uget(i)) })
+                .collect();
 
             let widths = (xx2 - xx1).mapv(|v| f32::max(0.0, v));
             let heights = (yy2 - yy1).mapv(|v| f32::max(0.0, v));
 
             let ious = widths * heights;
-            let cut_areas: Array1<f32> = indices.iter().map(|&i| areas[i]).collect();
-            let overlap = &ious / (areas[cur_idx] + cut_areas - &ious + epsilon);
+            let cut_areas: Array1<f32> =
+                indices.iter().map(|&i| unsafe { *areas.uget(i) }).collect();
+            let overlap = &ious / (unsafe { *areas.uget(cur_idx) } + cut_areas - &ious + epsilon);
 
             indices = indices
                 .into_iter()
                 .enumerate()
-                .filter_map(|(i, j)| (overlap[i] <= iou_threshold).then_some(j))
+                .filter_map(|(i, j)| (unsafe { *overlap.uget(i) } <= iou_threshold).then_some(j))
                 .collect();
         }
 
@@ -189,7 +208,7 @@ impl RustPostprocessor {
         epsilon: Option<f32>,
         agnostic: Option<bool>,
     ) -> Vec<DetectionResults> {
-        let max_nms: usize = 30000;
+        let max_nms: usize = 30_000;
         let mut detection_boxes = self.box_decode(inputs, conf_threshold);
         // Inner vector for the result indexes in one image, outer vector for batch
         let indices: Vec<Vec<usize>> = detection_boxes
