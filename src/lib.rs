@@ -34,8 +34,8 @@ fn furiosa_native_postprocess(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
 
     m.add("__version__", VERSION)?;
 
-    add_submodule(m, ssd_large::ssd_resnet34, "ssd_large")?;
-    add_submodule(m, ssd_small::ssd_mobilenet, "ssd_small")?;
+    add_submodule(m, ssd_large::ssd_resnet34, "ssd_resnet34")?;
+    add_submodule(m, ssd_small::ssd_mobilenet, "ssd_mobilenet")?;
     add_submodule(m, yolo::yolo, "yolo")?;
 
     // backward compatibility
