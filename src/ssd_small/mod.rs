@@ -242,8 +242,7 @@ impl RustPostProcessor {
     }
 }
 
-#[pymodule]
-pub(crate) fn ssd_mobilenet(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
+pub(crate) fn ssd_mobilenet(m: &PyModule) -> PyResult<()> {
     m.add_class::<RustPostProcessor>()?;
 
     Ok(())

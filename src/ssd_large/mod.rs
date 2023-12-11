@@ -279,8 +279,7 @@ impl RustPostProcessor {
     }
 }
 
-#[pymodule]
-pub(crate) fn ssd_resnet34(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
+pub(crate) fn ssd_resnet34(m: &PyModule) -> PyResult<()> {
     m.add_class::<RustPostProcessor>()?;
 
     Ok(())

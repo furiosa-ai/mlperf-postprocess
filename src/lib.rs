@@ -9,22 +9,34 @@ pub mod ssd_large;
 pub mod ssd_small;
 pub mod yolov5;
 
+fn add_submodule(
+    m: &PyModule,
+    init_submodule: fn(&PyModule) -> PyResult<()>,
+    name: &str,
+) -> PyResult<()> {
+    let submodule = PyModule::new(m.py(), name)?;
+    init_submodule(submodule)?;
+    m.add_submodule(submodule)?;
+
+    // Add module into Python modules dict as PyO3 could not recognize parent as package
+    // See https://github.com/PyO3/pyo3/issues/759
+    m.py()
+        .import("sys")?
+        .getattr("modules")?
+        .set_item(format!("furiosa_native_postprocess.{name}"), submodule)?;
+
+    Ok(())
+}
+
 #[pymodule]
-fn furiosa_native_postprocess(py: Python<'_>, m: &PyModule) -> PyResult<()> {
-    let py_sys_module: &pyo3::types::PyDict = py.import("sys")?.getattr("modules")?.downcast()?;
-    let ssd_mobilenet_module = pyo3::wrap_pymodule!(ssd_small::ssd_mobilenet);
-    let ssd_resnet34_module = pyo3::wrap_pymodule!(ssd_large::ssd_resnet34);
-    let yolov5_module = pyo3::wrap_pymodule!(yolov5::yolov5);
+fn furiosa_native_postprocess(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
+    const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-    m.add_wrapped(ssd_mobilenet_module)?;
-    m.add_wrapped(ssd_resnet34_module)?;
-    m.add_wrapped(yolov5_module)?;
+    m.add("__version__", VERSION)?;
 
-    py_sys_module
-        .set_item("furiosa_native_postprocess.ssd_mobilenet", m.getattr("ssd_mobilenet")?)?;
-    py_sys_module
-        .set_item("furiosa_native_postprocess.ssd_resnet34", m.getattr("ssd_resnet34")?)?;
-    py_sys_module.set_item("furiosa_native_postprocess.yolov5", m.getattr("yolov5")?)?;
+    add_submodule(m, ssd_large::ssd_resnet34, "ssd_large")?;
+    add_submodule(m, ssd_small::ssd_mobilenet, "ssd_small")?;
+    add_submodule(m, yolov5::yolov5, "yolov5")?;
 
     Ok(())
 }

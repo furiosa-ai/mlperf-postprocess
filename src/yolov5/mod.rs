@@ -277,8 +277,7 @@ impl RustPostProcessor {
     }
 }
 
-#[pymodule]
-pub(crate) fn yolov5(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
+pub(crate) fn yolov5(m: &PyModule) -> PyResult<()> {
     m.add_class::<RustPostProcessor>()?;
 
     Ok(())
