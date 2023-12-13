@@ -18,7 +18,6 @@ pub struct DetectionBoxes {
     pub y2: Array1<f32>,
     pub scores: Array1<f32>,
     pub classes: Array1<f32>,
-    pub len: usize,
 }
 
 impl DetectionBoxes {
@@ -30,8 +29,7 @@ impl DetectionBoxes {
         scores: Array1<f32>,
         classes: Array1<f32>,
     ) -> Self {
-        let len = x1.len();
-        Self { x1, y1, x2, y2, scores, classes, len }
+        Self { x1, y1, x2, y2, scores, classes }
     }
 
     pub fn empty() -> Self {
@@ -42,7 +40,6 @@ impl DetectionBoxes {
             y2: vec![].into(),
             scores: vec![].into(),
             classes: vec![].into(),
-            len: 0,
         }
     }
 
@@ -55,7 +52,6 @@ impl DetectionBoxes {
         scores: Array1<f32>,
         classes: Array1<f32>,
     ) {
-        self.len += x1.len();
         self.x1.append(ndarray::Axis(0), x1.view()).unwrap();
         self.y1.append(ndarray::Axis(0), y1.view()).unwrap();
         self.x2.append(ndarray::Axis(0), x2.view()).unwrap();
@@ -65,8 +61,15 @@ impl DetectionBoxes {
     }
 
     pub fn sort_by_score_and_trim(&mut self, len: usize) {
-        let mut indices: Vec<usize> = (0..self.len).collect();
-        indices.sort_unstable_by(|&a, &b| self.scores[b].partial_cmp(&self.scores[a]).unwrap());
+        let mut indices: Vec<usize> = (0..self.len()).collect();
+        // Sort by score in descending order
+        unsafe {
+            indices.sort_unstable_by(|&a, &b| {
+                let a = self.scores.uget(a);
+                let b = self.scores.uget(b);
+                b.partial_cmp(a).unwrap()
+            });
+        }
         indices.truncate(len);
         indices.reverse();
 
@@ -76,5 +79,13 @@ impl DetectionBoxes {
         self.y2 = self.y2.select(ndarray::Axis(0), &indices).to_owned();
         self.scores = self.scores.select(ndarray::Axis(0), &indices).to_owned();
         self.classes = self.classes.select(ndarray::Axis(0), &indices).to_owned();
+    }
+
+    pub fn len(&self) -> usize {
+        self.x1.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.x1.is_empty()
     }
 }

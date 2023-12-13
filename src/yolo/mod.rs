@@ -138,13 +138,14 @@ impl RustPostprocessor {
         const MAX_WH: f32 = 7680.;
         let epsilon = epsilon.unwrap_or(1e-5);
 
-        let c = if agnostic { Array1::zeros(boxes.len) } else { boxes.classes.to_owned() * MAX_WH };
+        let c =
+            if agnostic { Array1::zeros(boxes.len()) } else { boxes.classes.to_owned() * MAX_WH };
         let x1 = &boxes.x1 + &c;
         let y1 = &boxes.y1 + &c;
         let x2 = &boxes.x2 + &c;
         let y2 = &boxes.y2 + &c;
 
-        let mut indices: Vec<usize> = (0..boxes.len).collect();
+        let mut indices: Vec<usize> = (0..boxes.len()).collect();
         let mut results: Vec<usize> = Vec::new();
 
         let dx = (&x2 - &x1).map(|&v| f32::max(0., v));
@@ -211,7 +212,7 @@ impl RustPostprocessor {
         let indices: Vec<Vec<usize>> = detection_boxes
             .iter_mut()
             .map(|dbox| {
-                if dbox.len > MAX_NMS_INPUT {
+                if dbox.len() > MAX_NMS_INPUT {
                     dbox.sort_by_score_and_trim(MAX_NMS_INPUT);
                 };
                 Self::nms(dbox, iou_threshold, epsilon, agnostic.unwrap_or(self.agnostic))
