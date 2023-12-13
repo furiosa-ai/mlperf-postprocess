@@ -134,7 +134,7 @@ impl RustPostprocessor {
         epsilon: Option<f32>,
         agnostic: bool,
     ) -> Vec<usize> {
-        const MAX_BOXES: usize = 300;
+        const MAX_NMS: usize = 300;
         const MAX_WH: f32 = 7680.;
         let epsilon = epsilon.unwrap_or(1e-5);
 
@@ -159,7 +159,7 @@ impl RustPostprocessor {
         });
 
         while let Some(cur_idx) = indices.pop() {
-            if results.len() >= MAX_BOXES {
+            if results.len() >= MAX_NMS {
                 break;
             }
             results.push(cur_idx);
@@ -205,14 +205,14 @@ impl RustPostprocessor {
         epsilon: Option<f32>,
         agnostic: Option<bool>,
     ) -> Vec<Array2<f32>> {
-        let max_nms: usize = 30_000;
+        const MAX_NMS_INPUT: usize = 30_000;
         let mut detection_boxes = self.box_decode(inputs, conf_threshold);
         // Inner vector for the result indexes in one image, outer vector for batch
         let indices: Vec<Vec<usize>> = detection_boxes
             .iter_mut()
             .map(|dbox| {
-                if dbox.len > max_nms {
-                    dbox.sort_by_score_and_trim(max_nms);
+                if dbox.len > MAX_NMS_INPUT {
+                    dbox.sort_by_score_and_trim(MAX_NMS_INPUT);
                 };
                 Self::nms(dbox, iou_threshold, epsilon, agnostic.unwrap_or(self.agnostic))
             })
