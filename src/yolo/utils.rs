@@ -1,4 +1,4 @@
-use ndarray::Array1;
+use ndarray::{Array1, Array2};
 
 pub fn centered_box_to_ltrb_bulk(
     pcy: &Array1<f32>,
@@ -87,5 +87,20 @@ impl DetectionBoxes {
 
     pub fn is_empty(&self) -> bool {
         self.x1.is_empty()
+    }
+
+    pub fn select_and_convert(&mut self, indicies: &[usize]) -> Array2<f32> {
+        let mut results = unsafe { Array2::uninit((indicies.len(), 6)).assume_init() };
+        for (i, &j) in indicies.iter().enumerate() {
+            unsafe {
+                *results.uget_mut([i, 0]) = *self.x1.uget(j);
+                *results.uget_mut([i, 1]) = *self.y1.uget(j);
+                *results.uget_mut([i, 2]) = *self.x2.uget(j);
+                *results.uget_mut([i, 3]) = *self.y2.uget(j);
+                *results.uget_mut([i, 4]) = *self.scores.uget(j);
+                *results.uget_mut([i, 5]) = *self.classes.uget(j);
+            }
+        }
+        results
     }
 }

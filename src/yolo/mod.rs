@@ -216,18 +216,7 @@ impl RustPostprocessor {
                     dbox.sort_by_score_and_trim(MAX_NMS_INPUT);
                 };
                 let indices = Self::nms(&dbox, iou_threshold, epsilon, agnostic);
-                let mut results = unsafe { Array2::uninit((indices.len(), 6)).assume_init() };
-                for (i, &j) in indices.iter().enumerate() {
-                    unsafe {
-                        *results.uget_mut([i, 0]) = *dbox.x1.uget(j);
-                        *results.uget_mut([i, 1]) = *dbox.y1.uget(j);
-                        *results.uget_mut([i, 2]) = *dbox.x2.uget(j);
-                        *results.uget_mut([i, 3]) = *dbox.y2.uget(j);
-                        *results.uget_mut([i, 4]) = *dbox.scores.uget(j);
-                        *results.uget_mut([i, 5]) = *dbox.classes.uget(j);
-                    }
-                }
-                results
+                dbox.select_and_convert(&indices)
             })
             .collect()
     }
