@@ -5,7 +5,7 @@ WHEEL_DIR ?= ./wheels
 .PHONY: install-deps
 install-deps:
 	python -m pip install \
-		"maturin[patchelf]~=1.1.0" \
+		"maturin[patchelf]~=1.2.0" \
 		"ziglang==0.12.0.dev.168+67db26566"
 
 .PYONY: lint
@@ -23,10 +23,8 @@ clean-wheels:
 
 .PHONY: build-wheels
 build-wheels: clean-wheels
-	@# workaround for https://github.com/rust-cross/cargo-zigbuild/pull/140
-	BINDGEN_EXTRA_CLANG_ARGS= \
-		maturin build --locked -r --zig --strip -o "${WHEEL_DIR}" \
-			-i python3.8 -i python3.9 -i python3.10 -i python3.11
+	maturin build --locked -r --zig --strip -o "${WHEEL_DIR}" \
+		-i python3.8 -i python3.9 -i python3.10 -i python3.11
 
 .PHONY: check-dev-version
 check-dev-version:
