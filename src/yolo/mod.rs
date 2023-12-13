@@ -207,24 +207,17 @@ impl RustPostprocessor {
         agnostic: Option<bool>,
     ) -> Vec<Array2<f32>> {
         const MAX_NMS_INPUT: usize = 30_000;
-        let mut detection_boxes = self.box_decode(inputs, conf_threshold);
-        // Inner vector for the result indexes in one image, outer vector for batch
-        let indices: Vec<Vec<usize>> = detection_boxes
-            .iter_mut()
-            .map(|dbox| {
+        let agnostic: bool = agnostic.unwrap_or(self.agnostic);
+
+        self.box_decode(inputs, conf_threshold)
+            .into_par_iter()
+            .map(|mut dbox| {
                 if dbox.len() > MAX_NMS_INPUT {
                     dbox.sort_by_score_and_trim(MAX_NMS_INPUT);
                 };
-                Self::nms(dbox, iou_threshold, epsilon, agnostic.unwrap_or(self.agnostic))
-            })
-            .collect();
-
-        detection_boxes
-            .par_iter()
-            .zip(indices)
-            .map(|(dbox, idx)| {
-                let mut results = unsafe { Array2::uninit((idx.len(), 6)).assume_init() };
-                for (i, &j) in idx.iter().enumerate() {
+                let indices = Self::nms(&dbox, iou_threshold, epsilon, agnostic);
+                let mut results = unsafe { Array2::uninit((indices.len(), 6)).assume_init() };
+                for (i, &j) in indices.iter().enumerate() {
                     unsafe {
                         *results.uget_mut([i, 0]) = *dbox.x1.uget(j);
                         *results.uget_mut([i, 1]) = *dbox.y1.uget(j);
