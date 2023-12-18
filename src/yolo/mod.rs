@@ -69,21 +69,16 @@ impl RustPostprocessor {
                     for (y, inner_y) in inner_anchor.outer_iter().enumerate() {
                         for (x, inner_x) in inner_y.outer_iter().enumerate() {
                             // Destruct output array
-                            let &[bx, by, bw, bh, object_confidence, ref class_confs @ ..] =
+                            let &[bx, by, bw, bh, object_confidence, ref class_confs @ ..]: &[f32] =
                                 inner_x.as_slice().expect("inner_x must be contiguous")
                             else {
                                 unreachable!()
                             };
 
-                            // Low object confidence, skip
-                            if object_confidence <= conf_threshold {
-                                continue;
-                            };
-
                             // Find candidates where `class_confidence * object_confidence > conf_threshold`
                             let candidates = class_confs
                                 .iter()
-                                .enumerate()
+                                .enumerate() // enumerate to store class index for later
                                 .filter(|(_, &class_conf)| {
                                     class_conf * object_confidence > conf_threshold
                                 })
@@ -101,17 +96,17 @@ impl RustPostprocessor {
                             let w = 4.0 * bw * bw * ax;
 
                             for (class_idx, class_conf) in candidates {
+                                num_rows += 1;
+                                if num_rows >= MAX_BOXES {
+                                    break 'outer;
+                                }
+
                                 pcy.push(cy);
                                 pcx.push(cx);
                                 ph.push(h);
                                 pw.push(w);
                                 scores.push(class_conf * object_confidence);
                                 classes.push(class_idx as f32);
-
-                                num_rows += 1;
-                                if num_rows >= MAX_BOXES {
-                                    break 'outer;
-                                }
                             }
                         }
                     }
