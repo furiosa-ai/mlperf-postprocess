@@ -1,11 +1,10 @@
-#![allow(unused_extern_crates)]
-extern crate openmp_sys;
-
 use std::mem;
 
 use itertools::Itertools;
 use ndarray::Array3;
-use pyo3::{exceptions::PyValueError, prelude::*, types::PyList};
+use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
+use pyo3::types::PyList;
 use rayon::prelude::*;
 
 use crate::common::ssd_postprocess::{BoundingBox, CenteredBox, DetectionResult, DetectionResults};
@@ -243,8 +242,7 @@ impl RustPostProcessor {
     }
 }
 
-#[pymodule]
-pub(crate) fn ssd_mobilenet(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
+pub(crate) fn ssd_mobilenet(m: &PyModule) -> PyResult<()> {
     m.add_class::<RustPostProcessor>()?;
 
     Ok(())
